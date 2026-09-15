@@ -1,98 +1,90 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import mongoose from "mongoose";
 import cors from "cors";
 import dotenv from "dotenv";
-import dns from "dns";
-import path from "path";
+import mongoose from "mongoose";
 
-import menuRoutes from "./routes/menu.Routes.js";
 import orderRoutes from "./routes/order.Routes.js";
-import Order from "./models/orderModel.js";
-
-dns.setDefaultResultOrder("ipv4first");
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+import menuRoutes from "./routes/menu.Routes.js"; // Adjust path if needed
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const __dirname = path.resolve();
 
-app.use(cors({
-  origin: process.env.CLIENT_URL || "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-  credentials: true
-}));
+// 🌐 Allowed Origins List (Vercel Frontend & Localhost)
+const allowedOrigins = [
+  "https://major-internship-project-real-world.vercel.app",
+  "https://major-internship-project-real-world.vercel.app/",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
+
+// 1️⃣ Express CORS Middleware Setup
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Development/Production safe fallback
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"]
+  })
+);
+
 app.use(express.json());
 
+// 2️⃣ Socket.io Server Setup with CORS Fix
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "*",
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    origin: "*", // '*' lagane se Vercel aur WebSockets ka trailing slash conflict solve ho jata hai
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
+    credentials: true
   }
 });
 
+// Socket instance ko Express app me attach karna
 app.set("io", io);
 
+// 🔌 Socket Connection Events
 io.on("connection", (socket) => {
-  console.log("⚡ Kitchen/Client Connected to WebSocket:", socket.id);
+  console.log("⚡ New Client Connected:", socket.id);
+
+  // Bill Request Event Listener from Customer View
+  socket.on("request_bill", (data) => {
+    io.emit("order_updated", data);
+  });
+
+  socket.on("order_updated", () => {
+    io.emit("order_updated");
+  });
 
   socket.on("disconnect", () => {
     console.log("❌ Client Disconnected:", socket.id);
   });
 });
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/ricebowl_pos";
+// 📍 Routes
+app.use("/api/orders", orderRoutes);
+app.use("/api/menu", menuRoutes);
+
+// Base route test
+app.get("/", (req, res) => {
+  res.send("The Rice Bowl Backend API is running...");
+});
+
+// 🚀 Database Connection & Server Start
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/ricebowl";
 
 mongoose
   .connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected Successfully"))
+  .then(() => {
+    console.log("✅ MongoDB Connected Successfully");
+    server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  })
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
-
-app.use("/api/menu", menuRoutes);
-app.use("/api/menus", menuRoutes);
-app.use("/api/orders", orderRoutes);
-app.use("/api/order", orderRoutes);
-
-app.patch("/api/orders/:id/cancel-item", async (req, res) => {
-  try {
-    const { itemIndex } = req.body;
-    const order = await Order.findById(req.params.id);
-
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-    order.items[itemIndex].status = "Cancelled";
-
-    order.totalAmount = order.items
-      .filter((item) => item.status !== "Cancelled")
-      .reduce((sum, item) => sum + item.price * item.quantity, 0);
-
-    const allCancelled = order.items.every((item) => item.status === "Cancelled");
-    if (allCancelled) {
-      order.status = "Cancelled";
-    }
-
-    await order.save();
-    
-    io.emit("order_updated");
-
-    res.json({ success: true, data: order });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get("/", (req, res) => {
-  res.send("THE RICE BOWL POS Backend API with WebSockets is running!");
-});
-
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/build")));
-}
-
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server & WebSockets running on port ${PORT}`);
-});
