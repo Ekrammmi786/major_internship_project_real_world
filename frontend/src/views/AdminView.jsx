@@ -5,13 +5,17 @@ import { exportOrdersToCSV } from "../utils/exportToExcel";
 
 const CLOUD_NAME = "mno0e0mz"; 
 const UPLOAD_PRESET = "order_app";
-const socket = io("http://localhost:5000");
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
+const socket = io(BACKEND_URL);
 
 const AdminView = () => {
   const [activeTab, setActiveTab] = useState("billing"); 
   const [menuItems, setMenuItems] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
   const [selectedPrintOrder, setSelectedPrintOrder] = useState(null);
   const [confirmPaymentModal, setConfirmPaymentModal] = useState(null);
 
@@ -22,8 +26,8 @@ const AdminView = () => {
   const fetchData = async () => {
     try {
       const [menuRes, ordersRes] = await Promise.all([
-        fetch("http://localhost:5000/api/menu"),
-        fetch("http://localhost:5000/api/orders")
+        fetch(`${BACKEND_URL}/api/menu`),
+        fetch(`${BACKEND_URL}/api/orders`)
       ]);
       const menuData = await menuRes.json();
       const ordersData = await ordersRes.json();
@@ -47,12 +51,107 @@ const AdminView = () => {
     };
   }, []);
 
+  // ☁️ Cloudinary Image Upload
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+
+    const data = new FormData();
+    data.append("file", file);
+    data.append("upload_preset", UPLOAD_PRESET);
+
+    try {
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+        method: "POST",
+        body: data
+      });
+      const fileData = await res.json();
+      if (fileData.secure_url) {
+        setFormData((prev) => ({ ...prev, image: fileData.secure_url }));
+      }
+    } catch (err) {
+      console.error("Cloudinary Upload Error:", err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ➕ Add or Update Dish
+  const handleSubmitDish = async (e) => {
+    e.preventDefault();
+    if (!formData.name || !formData.price) return;
+
+    const url = editingItem 
+      ? `${BACKEND_URL}/api/menu/${editingItem._id}` 
+      : `${BACKEND_URL}/api/menu`;
+    const method = editingItem ? "PUT" : "POST";
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        setFormData({ name: "", category: "Rice Bowls", price: "", image: "", isAvailable: true });
+        setEditingItem(null);
+        fetchData();
+        socket.emit("menu_updated");
+      }
+    } catch (err) {
+      console.error("Dish submit error:", err);
+    }
+  };
+
+  // 🗑️ Delete Dish
+  const handleDeleteDish = async (id) => {
+    if (!window.confirm("Is dish ko menu se delete karna chahte ho?")) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/menu/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        fetchData();
+        socket.emit("menu_updated");
+      }
+    } catch (err) {
+      console.error("Delete error:", err);
+    }
+  };
+
+  // ✏️ Edit Dish Initiate
+  const handleEditClick = (item) => {
+    setEditingItem(item);
+    setFormData({
+      name: item.name,
+      category: item.category || "Rice Bowls",
+      price: item.price,
+      image: item.image || "",
+      isAvailable: item.isAvailable
+    });
+  };
+
+  const toggleStock = async (item) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/menu/${item._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...item, isAvailable: !item.isAvailable })
+      });
+      if (res.ok) {
+        fetchData();
+        socket.emit("menu_updated");
+      }
+    } catch (err) {
+      console.error("Stock toggle error:", err);
+    }
+  };
+
   const executePaymentSettle = async () => {
     if (!confirmPaymentModal) return;
     const { orderId, paymentMethod } = confirmPaymentModal;
 
     try {
-      const res = await fetch(`http://localhost:5000/api/orders/${orderId}`, {
+      const res = await fetch(`${BACKEND_URL}/api/orders/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "Paid", paymentMethod })
@@ -63,19 +162,6 @@ const AdminView = () => {
       }
     } catch (err) {
       console.error("Payment error:", err);
-    }
-  };
-
-  const toggleStock = async (item) => {
-    try {
-      const res = await fetch(`http://localhost:5000/api/menu/${item._id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...item, isAvailable: !item.isAvailable })
-      });
-      if (res.ok) fetchData();
-    } catch (err) {
-      console.error("Stock toggle error:", err);
     }
   };
 
@@ -104,7 +190,7 @@ const AdminView = () => {
   return (
     <div style={{ padding: "12px", maxWidth: "1100px", margin: "0 auto", fontFamily: "sans-serif" }}>
       
-      {/* 📊 Accounting Metrics */}
+      {/* Accounting Metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "16px" }}>
         <div style={{ backgroundColor: "#ffffff", padding: "12px", borderRadius: "12px", border: "1px solid #f5e6d3" }}>
           <span style={{ fontSize: "10px", color: "#78716c", fontWeight: "700" }}>TOTAL PAID REVENUE</span>
@@ -132,6 +218,9 @@ const AdminView = () => {
           </button>
           <button onClick={() => setActiveTab("accounting")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "accounting" ? "#dc2626" : "#e7e5e4", color: activeTab === "accounting" ? "#fff" : "#44403c", fontSize: "12px" }}>
             📑 Ledger Reports ({paidOrders.length})
+          </button>
+          <button onClick={() => setActiveTab("menu")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "menu" ? "#dc2626" : "#e7e5e4", color: activeTab === "menu" ? "#fff" : "#44403c", fontSize: "12px" }}>
+            📜 Menu & Dish Management ({menuItems.length})
           </button>
         </div>
 
@@ -187,9 +276,9 @@ const AdminView = () => {
         </div>
       )}
 
-      {/* TAB 2: Redesigned High-Contrast Audit Ledger */}
+      {/* TAB 2: Ledger Reports */}
       {activeTab === "accounting" && (
-        <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "12px", border: "1px solid #e7e5e4", boxShadow: "0 2px 10px rgba(0,0,0,0.03)", overflowX: "auto" }}>
+        <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "12px", border: "1px solid #e7e5e4", overflowX: "auto" }}>
           <h4 style={{ margin: "0 0 14px 0", fontSize: "14px", fontWeight: "800", color: "#1c1917" }}>
             🧾 Audit Ledger (Settled Tax Invoices)
           </h4>
@@ -212,7 +301,7 @@ const AdminView = () => {
               {paidOrders.length === 0 ? (
                 <tr>
                   <td colSpan="9" style={{ textAlign: "center", padding: "30px", color: "#78716c", fontWeight: "700", backgroundColor: "#faf6f0" }}>
-                    📄 Koi Settled/Paid Invoice nahi mila. Table Settlement se Bill Pay karne par record yahan show hoga.
+                    📄 No Settled/Paid Invoices found.
                   </td>
                 </tr>
               ) : (
@@ -259,18 +348,124 @@ const AdminView = () => {
                 })
               )}
             </tbody>
-            {paidOrders.length > 0 && (
-              <tfoot>
-                <tr style={{ backgroundColor: "#faf6f0", fontWeight: "800", borderTop: "2px solid #1c1917" }}>
-                  <td colSpan="4" style={{ padding: "10px 8px", textAlign: "right" }}>TOTAL SUMMARY:</td>
-                  <td style={{ padding: "10px 8px", color: "#16a34a", fontSize: "13px" }}>₹{grossRevenue}</td>
-                  <td style={{ padding: "10px 8px", color: "#dc2626" }}>₹{(totalTaxCollected / 2).toFixed(2)}</td>
-                  <td style={{ padding: "10px 8px", color: "#dc2626" }}>₹{(totalTaxCollected / 2).toFixed(2)}</td>
-                  <td colSpan="2"></td>
-                </tr>
-              </tfoot>
-            )}
           </table>
+        </div>
+      )}
+
+      {/* TAB 3: Complete Menu, Image Upload, Edit & Delete Management */}
+      {activeTab === "menu" && (
+        <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "12px", border: "1px solid #e7e5e4" }}>
+          <h4 style={{ margin: "0 0 14px 0", fontSize: "14px", fontWeight: "800", color: "#1c1917" }}>
+            {editingItem ? "✏️ Edit Dish Item" : "➕ Add New Dish Item"}
+          </h4>
+
+          {/* Add / Edit Form */}
+          <form onSubmit={handleSubmitDish} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", marginBottom: "20px", backgroundColor: "#faf6f0", padding: "14px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
+            <div>
+              <label style={{ fontSize: "10px", fontWeight: "700", color: "#78716c" }}>DISH NAME</label>
+              <input
+                type="text"
+                placeholder="e.g. Paneer Tikka Rice Bowl"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #d6d3d1", fontSize: "12px", marginTop: "4px" }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: "10px", fontWeight: "700", color: "#78716c" }}>PRICE (₹)</label>
+              <input
+                type="number"
+                placeholder="220"
+                value={formData.price}
+                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #d6d3d1", fontSize: "12px", marginTop: "4px" }}
+                required
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: "10px", fontWeight: "700", color: "#78716c" }}>CATEGORY</label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #d6d3d1", fontSize: "12px", marginTop: "4px" }}
+              >
+                <option value="Rice Bowls">Rice Bowls</option>
+                <option value="Starters">Starters</option>
+                <option value="Beverages">Beverages</option>
+                <option value="Desserts">Desserts</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: "10px", fontWeight: "700", color: "#78716c" }}>DISH IMAGE (CLOUDINARY)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                style={{ width: "100%", padding: "5px", fontSize: "11px", marginTop: "4px" }}
+              />
+              {uploading && <span style={{ fontSize: "10px", color: "#0284c7" }}>Uploading to Cloudinary...</span>}
+              {formData.image && <span style={{ fontSize: "10px", color: "#16a34a", display: "block" }}>✓ Image Uploaded</span>}
+            </div>
+
+            <div style={{ gridColumn: "1/-1", display: "flex", gap: "10px", marginTop: "6px" }}>
+              <button type="submit" style={{ padding: "8px 20px", backgroundColor: editingItem ? "#0284c7" : "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                {editingItem ? "Update Dish" : "+ Add Dish"}
+              </button>
+              {editingItem && (
+                <button type="button" onClick={() => { setEditingItem(null); setFormData({ name: "", category: "Rice Bowls", price: "", image: "", isAvailable: true }); }} style={{ padding: "8px 16px", backgroundColor: "#78716c", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Menu Items List with Image, Edit, Delete */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "12px" }}>
+            {menuItems.map((item) => (
+              <div key={item._id} style={{ display: "flex", gap: "12px", alignItems: "center", padding: "10px", backgroundColor: "#fff", borderRadius: "10px", border: "1px solid #e7e5e4" }}>
+                <img
+                  src={item.image || "https://via.placeholder.com/60"}
+                  alt={item.name}
+                  style={{ width: "60px", height: "60px", borderRadius: "8px", objectFit: "cover", backgroundColor: "#f5e6d3" }}
+                />
+                <div style={{ flexGrow: 1 }}>
+                  <strong style={{ display: "block", fontSize: "13px", color: "#1c1917" }}>{item.name}</strong>
+                  <span style={{ fontSize: "12px", color: "#15803d", fontWeight: "800" }}>₹{item.price}</span>
+                  <span style={{ fontSize: "10px", color: "#78716c", marginLeft: "6px" }}>({item.category})</span>
+                  
+                  <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                    <button
+                      onClick={() => toggleStock(item)}
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        border: "none",
+                        fontWeight: "700",
+                        fontSize: "10px",
+                        cursor: "pointer",
+                        backgroundColor: item.isAvailable ? "#dcfce7" : "#fee2e2",
+                        color: item.isAvailable ? "#15803d" : "#dc2626"
+                      }}
+                    >
+                      {item.isAvailable ? "In Stock" : "Out of Stock"}
+                    </button>
+
+                    <button onClick={() => handleEditClick(item)} style={{ padding: "3px 8px", backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", borderRadius: "12px", fontSize: "10px", fontWeight: "700", cursor: "pointer" }}>
+                      ✏️ Edit
+                    </button>
+
+                    <button onClick={() => handleDeleteDish(item._id)} style={{ padding: "3px 8px", backgroundColor: "#fee2e2", color: "#dc2626", border: "none", borderRadius: "12px", fontSize: "10px", fontWeight: "700", cursor: "pointer" }}>
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
