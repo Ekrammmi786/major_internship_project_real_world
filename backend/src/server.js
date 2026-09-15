@@ -6,55 +6,39 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 
 import orderRoutes from "./routes/order.Routes.js";
-import menuRoutes from "./routes/menu.Routes.js"; // Adjust path if needed
+import menuRoutes from "./routes/menu.Routes.js";
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 
-// 🌐 Allowed Origins List (Vercel Frontend & Localhost)
-const allowedOrigins = [
-  "https://major-internship-project-real-world.vercel.app",
-  "https://major-internship-project-real-world.vercel.app/",
-  "http://localhost:5173",
-  "http://localhost:3000"
-];
+// 🌐 Dynamic CORS Reflection (Solves Vercel & Render origin/slash mismatch)
+const corsOptions = {
+  origin: (origin, callback) => callback(null, true),
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE"]
+};
 
-// 1️⃣ Express CORS Middleware Setup
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, true); // Development/Production safe fallback
-      }
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"]
-  })
-);
-
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// 2️⃣ Socket.io Server Setup with CORS Fix
+// 🔌 Socket.io Setup with CORS & Multi-Transport Fix
 const io = new Server(server, {
   cors: {
-    origin: "*", // '*' lagane se Vercel aur WebSockets ka trailing slash conflict solve ho jata hai
+    origin: (origin, callback) => callback(null, true),
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
     credentials: true
-  }
+  },
+  transports: ["websocket", "polling"]
 });
 
-// Socket instance ko Express app me attach karna
 app.set("io", io);
 
-// 🔌 Socket Connection Events
+// 🔌 Socket Connection Listeners
 io.on("connection", (socket) => {
-  console.log("⚡ New Client Connected:", socket.id);
+  console.log("⚡ Client Connected:", socket.id);
 
-  // Bill Request Event Listener from Customer View
   socket.on("request_bill", (data) => {
     io.emit("order_updated", data);
   });
@@ -63,21 +47,24 @@ io.on("connection", (socket) => {
     io.emit("order_updated");
   });
 
+  socket.on("menu_updated", () => {
+    io.emit("menu_updated");
+  });
+
   socket.on("disconnect", () => {
     console.log("❌ Client Disconnected:", socket.id);
   });
 });
 
-// 📍 Routes
+// 📍 Routes Setup
 app.use("/api/orders", orderRoutes);
 app.use("/api/menu", menuRoutes);
 
-// Base route test
 app.get("/", (req, res) => {
-  res.send("The Rice Bowl Backend API is running...");
+  res.send("The Rice Bowl POS Backend API is live...");
 });
 
-// 🚀 Database Connection & Server Start
+// 🚀 Database Connection & Server Listen
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/ricebowl";
 

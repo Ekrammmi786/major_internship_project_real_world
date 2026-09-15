@@ -9,7 +9,12 @@ import {
 import Background3D from "../components/Background3D";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
-const socket = io(BACKEND_URL);
+
+// 🔌 Socket Init with Explicit Transports & Credentials
+const socket = io(BACKEND_URL, {
+  transports: ["websocket", "polling"],
+  withCredentials: true
+});
 
 const playAddSound = () => {
   try {
@@ -32,30 +37,29 @@ const playAddSound = () => {
 const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => {
   const [billRequested, setBillRequested] = useState(false);
 
-  // 1. Filter ONLY unpaid active orders for the current dining session
+  // Filter ONLY unpaid active orders for the current dining session
   const unpaidOrders = tableOrders.filter((o) =>
     ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
   );
 
-  // 2. Check payment status & select relevant orders
+  // Check payment status
   const isPaid = unpaidOrders.length === 0 && tableOrders.some((o) => o.status === "Paid");
 
   let currentSessionOrders = [];
   if (unpaidOrders.length > 0) {
     currentSessionOrders = unpaidOrders;
   } else if (isPaid) {
-    // Take the latest paid batch (updated recently)
     const paidOrders = tableOrders.filter((o) => o.status === "Paid");
     if (paidOrders.length > 0) {
       const latestTime = new Date(paidOrders[0].updatedAt || paidOrders[0].createdAt).getTime();
       currentSessionOrders = paidOrders.filter((o) => {
         const t = new Date(o.updatedAt || o.createdAt).getTime();
-        return Math.abs(latestTime - t) < 15 * 60 * 1000; // 15 mins window
+        return Math.abs(latestTime - t) < 15 * 60 * 1000;
       });
     }
   }
 
-  // Calculate items for ONLY current active/paid session
+  // Calculate items for current session only
   const activeItems = currentSessionOrders
     .filter((o) => o.status !== "Cancelled")
     .flatMap((o) => o.items || [])
@@ -181,7 +185,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
               <BellRing size={16} /> {billRequested ? "Cashier Notified ✅" : "Request Bill Payment from Cashier"}
             </button>
 
-            {/* Locked Download Button */}
             <button disabled style={{ width: "100%", padding: "10px", backgroundColor: "#f5f5f4", color: "#a8a29e", border: "1px solid #e7e5e4", borderRadius: "8px", fontWeight: "700", fontSize: "11px", cursor: "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
               <Lock size={14} /> Download Invoice (Locked until Paid)
             </button>
@@ -216,7 +219,6 @@ const CustomerView = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   
-  // Table Orders & End Meal Modal
   const [tableOrders, setTableOrders] = useState([]);
   const [showEndMealModal, setShowEndMealModal] = useState(false);
 

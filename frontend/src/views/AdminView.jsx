@@ -7,7 +7,12 @@ const CLOUD_NAME = "mno0e0mz";
 const UPLOAD_PRESET = "order_app";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
-const socket = io(BACKEND_URL);
+
+// 🔌 Socket Init with Explicit Transports & Credentials
+const socket = io(BACKEND_URL, {
+  transports: ["websocket", "polling"],
+  withCredentials: true
+});
 
 // 🔔 Loud Kitchen Chime Sound
 const playKitchenChime = () => {
@@ -56,7 +61,7 @@ const AdminView = () => {
   const [confirmPaymentModal, setConfirmPaymentModal] = useState(null);
   const [discountInput, setDiscountInput] = useState(0);
 
-  // 👨‍🍳 Kitchen States
+  // Kitchen States
   const [isKitchenStarted, setIsKitchenStarted] = useState(false);
   const [kitchenSubTab, setKitchenSubTab] = useState("Active");
 
@@ -98,7 +103,6 @@ const AdminView = () => {
     };
   }, [isKitchenStarted]);
 
-  // 👨‍🍳 Status Change Logic
   const updateOrderStatus = async (orderId, newStatus) => {
     setOrders((prev) =>
       prev.map((o) => ((o._id === orderId || o.id === orderId) ? { ...o, status: newStatus } : o))
@@ -129,7 +133,6 @@ const AdminView = () => {
     }
   };
 
-  // ❌ Item Level Cancellation
   const handleCancelItem = async (orderId, itemIndex) => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/orders/${orderId}/cancel-item`, {
@@ -146,7 +149,6 @@ const AdminView = () => {
     }
   };
 
-  // 💳 Execute Settle Payment & Assign GST Invoice (Robust Pay Function)
   const executePaymentSettle = async () => {
     if (!confirmPaymentModal) return;
     const { orderId, paymentMethod, amount } = confirmPaymentModal;
@@ -193,7 +195,6 @@ const AdminView = () => {
     }
   };
 
-  // ☁️ Cloudinary Upload
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -336,7 +337,7 @@ const AdminView = () => {
         </div>
       </div>
 
-      {/* Tabs Navigation */}
+      {/* Tabs */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button onClick={() => setActiveTab("billing")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "billing" ? "#dc2626" : "#e7e5e4", color: activeTab === "billing" ? "#fff" : "#44403c", fontSize: "12px" }}>
