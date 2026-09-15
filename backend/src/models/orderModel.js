@@ -2,23 +2,34 @@ import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema(
   {
-    tableNumber: { type: Number, required: true },
+    tableNumber: { type: String, required: true },
     items: [
       {
-        name: { type: String, required: true },
-        price: { type: Number, required: true },
-        quantity: { type: Number, required: true, default: 1 }
+        name: String,
+        price: Number,
+        quantity: Number,
+        status: { type: String, default: "Active" } // Active or Cancelled
       }
     ],
     totalAmount: { type: Number, required: true },
-    status: {
-      type: String,
-      enum: ["Pending", "Preparing", "Served", "Paid"],
-      default: "Pending"
+    status: { 
+      type: String, 
+      enum: ["Pending", "Preparing", "Ready", "Served", "Paid", "Cancelled"], 
+      default: "Pending" 
+    },
+    // 🆕 Production Accounting Fields
+    invoiceNumber: { type: String, default: null }, // e.g. TRB/2026-27/0001
+    paymentMethod: { type: String, default: "Cash" }, // Cash, UPI, Split
+    paymentBreakdown: {
+      cashAmount: { type: Number, default: 0 },
+      upiAmount: { type: Number, default: 0 }
+    },
+    discount: {
+      type: { type: String, enum: ["FLAT", "PERCENT"], default: "FLAT" },
+      amount: { type: Number, default: 0 }
     }
   },
   { timestamps: true }
 );
 
-const Order = mongoose.models.Order || mongoose.model("Order", orderSchema);
-export default Order;
+export default mongoose.model("Order", orderSchema);

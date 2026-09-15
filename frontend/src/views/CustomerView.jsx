@@ -2,7 +2,10 @@ import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronUp, Utensils, Sparkles, Flame } from "lucide-react";
+import { 
+  ChevronUp, Utensils, Sparkles, Flame, 
+  Printer, CheckCircle2, BellRing, Download, X, Flag, Lock 
+} from "lucide-react";
 import Background3D from "../components/Background3D";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
@@ -25,6 +28,181 @@ const playAddSound = () => {
   } catch (err) {}
 };
 
+// 🏁 STRICT END MEAL & ACCURATE BILL MODAL
+const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => {
+  const [billRequested, setBillRequested] = useState(false);
+
+  // 1. Filter ONLY unpaid active orders for the current dining session
+  const unpaidOrders = tableOrders.filter((o) =>
+    ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
+  );
+
+  // 2. Check payment status & select relevant orders
+  const isPaid = unpaidOrders.length === 0 && tableOrders.some((o) => o.status === "Paid");
+
+  let currentSessionOrders = [];
+  if (unpaidOrders.length > 0) {
+    currentSessionOrders = unpaidOrders;
+  } else if (isPaid) {
+    // Take the latest paid batch (updated recently)
+    const paidOrders = tableOrders.filter((o) => o.status === "Paid");
+    if (paidOrders.length > 0) {
+      const latestTime = new Date(paidOrders[0].updatedAt || paidOrders[0].createdAt).getTime();
+      currentSessionOrders = paidOrders.filter((o) => {
+        const t = new Date(o.updatedAt || o.createdAt).getTime();
+        return Math.abs(latestTime - t) < 15 * 60 * 1000; // 15 mins window
+      });
+    }
+  }
+
+  // Calculate items for ONLY current active/paid session
+  const activeItems = currentSessionOrders
+    .filter((o) => o.status !== "Cancelled")
+    .flatMap((o) => o.items || [])
+    .filter((i) => i.status !== "Cancelled");
+
+  const subtotal = activeItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const cgst = Number((subtotal * 0.025).toFixed(2));
+  const sgst = Number((subtotal * 0.025).toFixed(2));
+  const grandTotal = Math.round(subtotal + cgst + sgst);
+
+  const handleRequestBill = () => {
+    socket.emit("request_bill", { tableNumber, totalAmount: grandTotal });
+    setBillRequested(true);
+    alert(`Table #${tableNumber} cashier ko notification bhej di gayi hai!`);
+  };
+
+  const handleDownloadReceipt = () => {
+    if (!isPaid) return;
+
+    const printWindow = window.open("", "_blank");
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Tax Invoice - Table ${tableNumber}</title>
+          <style>
+            body { font-family: 'Courier New', monospace; width: 280px; margin: 0 auto; padding: 12px; color: #000; }
+            .center { text-align: center; }
+            .dash { border-bottom: 1px dashed #000; margin: 8px 0; }
+            .flex { display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; }
+            .total { font-weight: bold; font-size: 14px; margin-top: 6px; }
+            @media print { body { width: 100%; } }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <h2 style="margin:0;">THE RICE BOWL</h2>
+            <p style="margin:2px 0; font-size:11px;">Authentic Gourmet Bowls</p>
+            <p style="margin:2px 0; font-size:11px;">Table #${tableNumber} | Date: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+          <div class="dash"></div>
+          ${activeItems.map(item => `
+            <div class="flex">
+              <span>${item.name} x${item.quantity}</span>
+              <span>₹${item.price * item.quantity}</span>
+            </div>
+          `).join("")}
+          <div class="dash"></div>
+          <div class="flex"><span>Subtotal</span><span>₹${subtotal}</span></div>
+          <div class="flex"><span>CGST (2.5%)</span><span>₹${cgst}</span></div>
+          <div class="flex"><span>SGST (2.5%)</span><span>₹${sgst}</span></div>
+          <div class="dash"></div>
+          <div class="flex total"><span>Grand Total</span><span>₹${grandTotal}</span></div>
+          <div class="dash"></div>
+          <div class="center" style="font-size:11px; margin-top:12px;">
+            <p>Thank you for dining with us! 🙏</p>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 250);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px", backdropFilter: "blur(6px)" }}>
+      <div style={{ backgroundColor: "#ffffff", borderRadius: "20px", width: "100%", maxWidth: "400px", padding: "20px", position: "relative", boxShadow: "0 10px 30px rgba(0,0,0,0.3)" }}>
+        
+        <button onClick={onClose} style={{ position: "absolute", top: "16px", right: "16px", border: "none", backgroundColor: "#f5f5f4", borderRadius: "50%", padding: "6px", cursor: "pointer" }}>
+          <X size={18} color="#44403c" />
+        </button>
+
+        {/* Header & Status */}
+        <div style={{ textAlign: "center", marginBottom: "14px" }}>
+          <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", fontWeight: "900", color: "#1c1917" }}>
+            🧾 Table #{tableNumber} Bill Summary
+          </h3>
+          
+          <div style={{
+            display: "inline-block", padding: "4px 14px", borderRadius: "20px", fontSize: "11px", fontWeight: "800",
+            backgroundColor: isPaid ? "#dcfce7" : "#fee2e2",
+            color: isPaid ? "#15803d" : "#dc2626",
+            border: isPaid ? "1px solid #86efac" : "1px solid #fca5a5"
+          }}>
+            {isPaid ? "🟢 STATUS: PAID" : "🔴 STATUS: UNPAID (Payment Pending)"}
+          </div>
+        </div>
+
+        {/* Itemized Breakdown */}
+        <div style={{ maxHeight: "180px", overflowY: "auto", marginBottom: "12px", borderTop: "1px dashed #f5e6d3", paddingTop: "8px" }}>
+          {activeItems.length === 0 ? (
+            <p style={{ fontSize: "12px", color: "#78716c", textAlign: "center", padding: "10px" }}>No active dishes ordered.</p>
+          ) : (
+            activeItems.map((item, idx) => (
+              <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", padding: "4px 0", borderBottom: "1px dashed #faf6f0", color: "#334155" }}>
+                <span>{item.name} <strong style={{ color: "#dc2626" }}>x{item.quantity}</strong></span>
+                <span style={{ fontWeight: "700" }}>₹{item.price * item.quantity}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Financial Totals */}
+        <div style={{ backgroundColor: "#faf6f0", padding: "12px", borderRadius: "10px", marginBottom: "16px", border: "1px solid #f5e6d3" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#78716c", marginBottom: "2px" }}>
+            <span>Subtotal</span>
+            <span>₹{subtotal}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#78716c", marginBottom: "4px" }}>
+            <span>GST (5%)</span>
+            <span>₹{(cgst + sgst).toFixed(2)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "15px", fontWeight: "900", color: "#dc2626", borderTop: "1px dashed #d6d3d1", paddingTop: "6px" }}>
+            <span>Total Payable</span>
+            <span>₹{grandTotal}</span>
+          </div>
+        </div>
+
+        {/* Actions based on payment status */}
+        {!isPaid ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <button onClick={handleRequestBill} disabled={billRequested} style={{ width: "100%", padding: "12px", backgroundColor: billRequested ? "#16a34a" : "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "12px", cursor: billRequested ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              <BellRing size={16} /> {billRequested ? "Cashier Notified ✅" : "Request Bill Payment from Cashier"}
+            </button>
+
+            {/* Locked Download Button */}
+            <button disabled style={{ width: "100%", padding: "10px", backgroundColor: "#f5f5f4", color: "#a8a29e", border: "1px solid #e7e5e4", borderRadius: "8px", fontWeight: "700", fontSize: "11px", cursor: "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              <Lock size={14} /> Download Invoice (Locked until Paid)
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <button onClick={handleDownloadReceipt} style={{ width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              <Download size={16} /> Download Final Tax Invoice (PDF)
+            </button>
+
+            <button onClick={onResetSession} style={{ width: "100%", padding: "12px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
+              🔄 Clear & Start New Dining Session
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// 📱 MAIN CUSTOMER VIEW
 const CustomerView = () => {
   const [searchParams] = useSearchParams();
   const urlTable = searchParams.get("table") || "1";
@@ -37,7 +215,10 @@ const CustomerView = () => {
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [activeOrder, setActiveOrder] = useState(null);
+  
+  // Table Orders & End Meal Modal
+  const [tableOrders, setTableOrders] = useState([]);
+  const [showEndMealModal, setShowEndMealModal] = useState(false);
 
   const fetchMenu = async () => {
     try {
@@ -52,21 +233,32 @@ const CustomerView = () => {
     }
   };
 
+  const fetchTableOrders = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/orders`);
+      const data = await res.json();
+      const allOrders = data.success && Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
+      const filtered = allOrders.filter(
+        (o) => String(o.tableNumber) === String(tableNumber) && o.status !== "Cancelled"
+      );
+      setTableOrders(filtered);
+    } catch (err) {
+      console.error("Error fetching table orders:", err);
+    }
+  };
+
   useEffect(() => {
     fetchMenu();
+    fetchTableOrders();
 
     socket.on("menu_updated", fetchMenu);
-    socket.on("order_updated", (updatedOrder) => {
-      if (activeOrder && (updatedOrder._id === activeOrder._id || updatedOrder.id === activeOrder.id)) {
-        setActiveOrder(updatedOrder);
-      }
-    });
+    socket.on("order_updated", fetchTableOrders);
 
     return () => {
       socket.off("menu_updated");
       socket.off("order_updated");
     };
-  }, [activeOrder]);
+  }, [tableNumber]);
 
   const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
 
@@ -128,8 +320,9 @@ const CustomerView = () => {
 
       if (res.ok && data.success) {
         setCart([]);
-        setActiveOrder(data.data);
         socket.emit("order_updated");
+        fetchTableOrders();
+        alert("Order placed successfully! Kitchen is preparing your food. 👨‍🍳");
       }
     } catch (err) {
       console.error("Order submit error:", err);
@@ -140,11 +333,15 @@ const CustomerView = () => {
 
   if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
 
+  const activeUnpaidOrders = tableOrders.filter((o) =>
+    ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
+  );
+
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
       <Background3D />
 
-      {/* 🚀 1. ULTRA-3D FOODY SWIPE-UP SPLASH SCREEN OVERLAY */}
+      {/* 🚀 SPLASH SCREEN OVERLAY */}
       <AnimatePresence>
         {!hasSwipedUp && (
           <motion.div
@@ -152,141 +349,45 @@ const CustomerView = () => {
             exit={{ y: "-100vh", opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.8, ease: [0.76, 0, 0.24, 1] }}
             style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              width: "100vw",
-              height: "100vh",
-              backgroundColor: "#090807",
-              zIndex: 100,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-              alignItems: "center",
-              paddingTop: "52px",
-              paddingBottom: "24px",
-              paddingLeft: "20px",
-              paddingRight: "20px",
-              boxSizing: "border-box",
-              overflow: "hidden",
-              perspective: "1000px"
+              position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", backgroundColor: "#090807", zIndex: 100,
+              display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "center",
+              paddingTop: "52px", paddingBottom: "24px", paddingLeft: "20px", paddingRight: "20px", boxSizing: "border-box"
             }}
           >
-            {/* Background Ambient Glowing Auras */}
             <div style={{ position: "absolute", top: "20%", left: "50%", transform: "translate(-50%, -50%)", width: "320px", height: "320px", background: "radial-gradient(circle, rgba(245, 158, 11, 0.25) 0%, rgba(220, 38, 38, 0.15) 50%, transparent 70%)", borderRadius: "50%", filter: "blur(60px)", pointerEvents: "none" }} />
 
-            {/* FLOATING 3D FOODY BADGES */}
-            <motion.div
-              animate={{ y: [0, -12, 0], rotate: [0, 6, 0] }}
-              transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-              style={{ position: "absolute", top: "14%", left: "6%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(245, 158, 11, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#fef08a", fontSize: "11px", fontWeight: "800", boxShadow: "0 8px 20px rgba(0,0,0,0.5)", zIndex: 10 }}
-            >
+            <motion.div animate={{ y: [0, -12, 0] }} transition={{ repeat: Infinity, duration: 4 }} style={{ position: "absolute", top: "14%", left: "6%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(245, 158, 11, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#fef08a", fontSize: "11px", fontWeight: "800" }}>
               🌶️ Extra Spicy Punjabi
             </motion.div>
 
-            <motion.div
-              animate={{ y: [0, 14, 0], rotate: [0, -6, 0] }}
-              transition={{ repeat: Infinity, duration: 4.5, ease: "easeInOut", delay: 0.5 }}
-              style={{ position: "absolute", top: "18%", right: "6%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(34, 197, 94, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#86efac", fontSize: "11px", fontWeight: "800", boxShadow: "0 8px 20px rgba(0,0,0,0.5)", zIndex: 10 }}
-            >
+            <motion.div animate={{ y: [0, 14, 0] }} transition={{ repeat: Infinity, duration: 4.5, delay: 0.5 }} style={{ position: "absolute", top: "18%", right: "6%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(34, 197, 94, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#86efac", fontSize: "11px", fontWeight: "800" }}>
               🥦 100% Fresh Ingredients
             </motion.div>
 
-            <motion.div
-              animate={{ y: [0, -10, 0], rotate: [0, -4, 0] }}
-              transition={{ repeat: Infinity, duration: 3.8, ease: "easeInOut", delay: 1 }}
-              style={{ position: "absolute", bottom: "28%", left: "4%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(220, 38, 38, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#fca5a5", fontSize: "11px", fontWeight: "800", boxShadow: "0 8px 20px rgba(0,0,0,0.5)", zIndex: 10 }}
-            >
-              🍲 Sizzling Hot Gravies
+            <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ zIndex: 20, display: "flex", alignItems: "center", gap: "8px", backgroundColor: "rgba(28, 25, 23, 0.9)", border: "1px solid rgba(245, 158, 11, 0.4)", padding: "6px 16px", borderRadius: "24px", color: "#f59e0b", fontSize: "11px", fontWeight: "800" }}>
+              <Sparkles size={14} />
+              <span>TABLE #{tableNumber} • LIVE DIGITAL MENU</span>
             </motion.div>
 
-            <motion.div
-              animate={{ y: [0, 12, 0], rotate: [0, 5, 0] }}
-              transition={{ repeat: Infinity, duration: 4.2, ease: "easeInOut", delay: 1.5 }}
-              style={{ position: "absolute", bottom: "32%", right: "4%", backgroundColor: "rgba(28, 25, 23, 0.85)", border: "1px solid rgba(245, 158, 11, 0.3)", backdropFilter: "blur(12px)", padding: "6px 12px", borderRadius: "20px", color: "#fde047", fontSize: "11px", fontWeight: "800", boxShadow: "0 8px 20px rgba(0,0,0,0.5)", zIndex: 10 }}
-            >
-              ⏱️ Freshly Prepared
-            </motion.div>
-
-            {/* Top Status Bar */}
-            <motion.div
-              initial={{ y: -20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              style={{ zIndex: 20, display: "flex", alignItems: "center", gap: "8px", backgroundColor: "rgba(28, 25, 23, 0.9)", border: "1px solid rgba(245, 158, 11, 0.4)", padding: "6px 16px", borderRadius: "24px", color: "#f59e0b", fontSize: "11px", fontWeight: "800", boxShadow: "0 4px 20px rgba(245, 158, 11, 0.2)" }}
-            >
-              <Sparkles size={14} className="animate-spin" />
-              <span>TABLE #{tableNumber} • LIVE DIGITAL POS MENU</span>
-            </motion.div>
-
-            {/* CENTRAL 3D STEAMING BOWL HERO */}
-            <div style={{ textAlign: "center", margin: "auto 0", zIndex: 20, position: "relative" }}>
-              
-              {/* Animated Rising Steam Particles */}
-              <div style={{ position: "absolute", top: "-30px", left: "50%", transform: "translateX(-50%)", display: "flex", gap: "12px", pointerEvents: "none" }}>
-                {[0, 0.4, 0.8].map((delay, i) => (
-                  <motion.div
-                    key={i}
-                    animate={{ y: [-5, -35], opacity: [0, 0.7, 0], scale: [0.8, 1.4] }}
-                    transition={{ repeat: Infinity, duration: 2, delay }}
-                    style={{ width: "8px", height: "8px", backgroundColor: "rgba(255, 255, 255, 0.6)", borderRadius: "50%", filter: "blur(3px)" }}
-                  />
-                ))}
-              </div>
-
-              {/* 3D Glass Badge */}
-              <motion.div
-                initial={{ scale: 0.5, rotateX: 30, opacity: 0 }}
-                animate={{ scale: 1, rotateX: 0, opacity: 1 }}
-                transition={{ duration: 0.7, type: "spring", stiffness: 120 }}
-                style={{
-                  width: "110px",
-                  height: "110px",
-                  margin: "0 auto 20px auto",
-                  borderRadius: "30px",
-                  background: "linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(220, 38, 38, 0.9))",
-                  padding: "3px",
-                  boxShadow: "0 20px 40px rgba(220, 38, 38, 0.4)",
-                  transformStyle: "preserve-3d"
-                }}
-              >
+            <div style={{ textAlign: "center", margin: "auto 0", zIndex: 20 }}>
+              <div style={{ width: "110px", height: "110px", margin: "0 auto 20px auto", borderRadius: "30px", background: "linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(220, 38, 38, 0.9))", padding: "3px" }}>
                 <div style={{ width: "100%", height: "100%", backgroundColor: "#141210", borderRadius: "27px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <motion.div
-                    animate={{ rotate: [0, -5, 5, 0] }}
-                    transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
-                  >
-                    <Utensils size={48} color="#f59e0b" />
-                  </motion.div>
+                  <Utensils size={48} color="#f59e0b" />
                 </div>
-              </motion.div>
-
-              {/* Glowing Foody Title */}
-              <h1 style={{ fontSize: "38px", fontWeight: "900", margin: 0, letterSpacing: "-0.5px", background: "linear-gradient(to right, #ffffff, #fef08a, #f59e0b, #ef4444)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              </div>
+              <h1 style={{ fontSize: "38px", fontWeight: "900", margin: 0, background: "linear-gradient(to right, #ffffff, #fef08a, #f59e0b, #ef4444)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
                 THE RICE BOWL
               </h1>
-              <p style={{ color: "#d6d3d1", fontSize: "13px", marginTop: "10px", fontWeight: "700", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", letterSpacing: "0.5px" }}>
+              <p style={{ color: "#d6d3d1", fontSize: "13px", marginTop: "10px", fontWeight: "700" }}>
                 <Flame size={16} color="#ef4444" /> Craving Something Gourmet?
               </p>
             </div>
 
-            {/* DRAGGABLE 3D SWIPE-UP CTA HANDLE */}
-            <motion.div
-              drag="y"
-              dragConstraints={{ top: -140, bottom: 0 }}
-              dragElastic={0.2}
-              onDragEnd={(_, info) => {
-                if (info.offset.y < -70 || info.velocity.y < -200) setHasSwipedUp(true);
-              }}
-              onClick={() => setHasSwipedUp(true)}
-              style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "10px", zIndex: 30 }}
-            >
-              <motion.div
-                animate={{ y: [0, -10, 0], scale: [1, 1.08, 1] }}
-                transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
-                style={{ padding: "12px", backgroundColor: "rgba(245, 158, 11, 0.2)", border: "1px solid rgba(245, 158, 11, 0.5)", borderRadius: "50%", color: "#f59e0b", boxShadow: "0 0 25px rgba(245, 158, 11, 0.4)" }}
-              >
+            <motion.div onClick={() => setHasSwipedUp(true)} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "10px", zIndex: 30 }}>
+              <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.6 }} style={{ padding: "12px", backgroundColor: "rgba(245, 158, 11, 0.2)", border: "1px solid rgba(245, 158, 11, 0.5)", borderRadius: "50%", color: "#f59e0b" }}>
                 <ChevronUp size={28} />
               </motion.div>
-              <div style={{ backgroundColor: "#1c1917", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "12px 24px", borderRadius: "25px", fontSize: "12px", fontWeight: "900", color: "#f5f5f4", letterSpacing: "1.5px", boxShadow: "0 10px 30px rgba(0,0,0,0.8)" }}>
+              <div style={{ backgroundColor: "#1c1917", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "12px 24px", borderRadius: "25px", fontSize: "12px", fontWeight: "900", color: "#f5f5f4", letterSpacing: "1.5px" }}>
                 SWIPE UP TO EXPLORE MENU 🍲
               </div>
             </motion.div>
@@ -294,24 +395,20 @@ const CustomerView = () => {
         )}
       </AnimatePresence>
 
-      {/* 📱 2. MAIN CUSTOMER MENU CONTENT */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "10px", maxWidth: "1100px", margin: "0 auto" }}>
+      {/* 📱 MAIN MENU CONTENT */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "10px", maxWidth: "1100px", margin: "0 auto", paddingBottom: tableOrders.length > 0 ? "130px" : "80px" }}>
         
         {/* Header Bar */}
-        <div style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", backdropFilter: "blur(10px)", padding: "12px", borderRadius: "14px", border: "1px solid #f5e6d3", boxShadow: "0 2px 10px rgba(0,0,0,0.04)" }}>
+        <div style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", backdropFilter: "blur(10px)", padding: "12px", borderRadius: "14px", border: "1px solid #f5e6d3" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
             <div>
-              <span style={{ fontSize: "10px", fontWeight: "800", color: "#dc2626", letterSpacing: "0.5px" }}>THE RICE BOWL • POS</span>
-              <h2 style={{ fontSize: "14px", fontWeight: "800", color: "#1c1917", margin: 0 }}>Punjabi Recipes 🔥</h2>
+              <span style={{ fontSize: "10px", fontWeight: "800", color: "#dc2626" }}>THE RICE BOWL</span>
+              <h2 style={{ fontSize: "14px", fontWeight: "800", color: "#1c1917", margin: 0 }}>Gourmet Menu 🔥</h2>
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#faf6f0", padding: "4px 8px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
               <label style={{ fontSize: "11px", fontWeight: "700", color: "#44403c" }}>Table:</label>
-              <select
-                value={tableNumber}
-                onChange={(e) => setTableNumber(e.target.value)}
-                style={{ padding: "2px 4px", borderRadius: "4px", fontWeight: "800", fontSize: "12px", border: "1px solid #e7e5e4", color: "#1c1917", backgroundColor: "#fff" }}
-              >
+              <select value={tableNumber} onChange={(e) => setTableNumber(e.target.value)} style={{ padding: "2px 4px", borderRadius: "4px", fontWeight: "800", fontSize: "12px", border: "1px solid #e7e5e4", backgroundColor: "#fff" }}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
                   <option key={n} value={n}>#{n}</option>
                 ))}
@@ -319,98 +416,45 @@ const CustomerView = () => {
             </div>
           </div>
 
-          <input
-            type="text"
-            placeholder="🔍 Search delicious dishes..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid #e7e5e4", outline: "none", fontSize: "12px", color: "#1c1917", backgroundColor: "#faf6f0", marginBottom: "8px", boxSizing: "border-box" }}
-          />
+          <input type="text" placeholder="🔍 Search delicious dishes..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid #e7e5e4", fontSize: "12px", backgroundColor: "#faf6f0", marginBottom: "8px", boxSizing: "border-box" }} />
 
-          <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "2px" }}>
+          <div style={{ display: "flex", gap: "6px", overflowX: "auto" }}>
             {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => { playAddSound(); setSelectedCategory(cat); }}
-                style={{
-                  padding: "5px 12px",
-                  borderRadius: "16px",
-                  border: "none",
-                  fontSize: "11px",
-                  fontWeight: "700",
-                  whiteSpace: "nowrap",
-                  cursor: "pointer",
-                  backgroundColor: selectedCategory === cat ? "#dc2626" : "#f5f5f4",
-                  color: selectedCategory === cat ? "#ffffff" : "#44403c"
-                }}
-              >
+              <button key={cat} onClick={() => { playAddSound(); setSelectedCategory(cat); }} style={{ padding: "5px 12px", borderRadius: "16px", border: "none", fontSize: "11px", fontWeight: "700", whiteSpace: "nowrap", cursor: "pointer", backgroundColor: selectedCategory === cat ? "#dc2626" : "#f5f5f4", color: selectedCategory === cat ? "#ffffff" : "#44403c" }}>
                 {cat}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Real-time Order Tracker */}
-        {activeOrder && (
-          <div style={{ backgroundColor: "#1c1917", color: "#fff", padding: "10px 14px", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+        {/* Live Active Orders Tracker Banner */}
+        {activeUnpaidOrders.length > 0 && (
+          <div style={{ backgroundColor: "#1c1917", color: "#fff", padding: "10px 14px", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <span style={{ fontSize: "10px", color: "#a8a29e" }}>Active Session (Table #{activeOrder.tableNumber})</span>
-              <div style={{ fontSize: "13px", fontWeight: "700", color: "#f59e0b" }}>
-                Status: {activeOrder.status === "Pending" ? "⏳ Sent to Kitchen" : activeOrder.status === "Preparing" ? "🍳 Cooking in Progress" : "🍽️ Served at Table!"}
+              <span style={{ fontSize: "10px", color: "#a8a29e" }}>Active Dining Orders ({activeUnpaidOrders.length} rounds placed)</span>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#f59e0b" }}>
+                Latest Status: {activeUnpaidOrders[activeUnpaidOrders.length - 1].status === "Pending" ? "⏳ Sent to Kitchen" : activeUnpaidOrders[activeUnpaidOrders.length - 1].status === "Preparing" ? "🍳 Cooking in Progress" : "🍽️ Served!"}
               </div>
             </div>
-            {activeOrder.status === "Served" && (
-              <button onClick={() => setActiveOrder(null)} style={{ padding: "5px 10px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>
-                Dismiss
-              </button>
-            )}
+            <span style={{ fontSize: "11px", backgroundColor: "#334155", padding: "4px 8px", borderRadius: "6px", fontWeight: "700" }}>
+              Order More Below 👇
+            </span>
           </div>
         )}
 
-        {/* Food Items Compact Grid */}
-        <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "10px" }}>
-          {filteredItems.map((item, index) => {
+        {/* Food Items Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "10px" }}>
+          {filteredItems.map((item) => {
             const isOut = item.isAvailable === false;
             return (
-              <div
-                key={item._id}
-                className="food-card-animated"
-                style={{
-                  animationDelay: `${(index % 4) * 0.3}s`,
-                  backgroundColor: isOut ? "rgba(245, 245, 244, 0.9)" : "rgba(255, 255, 255, 0.95)",
-                  backdropFilter: "blur(6px)",
-                  borderRadius: "12px",
-                  overflow: "hidden",
-                  border: "1px solid #f5e6d3",
-                  display: "flex",
-                  flexDirection: "column",
-                  opacity: isOut ? 0.65 : 1,
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
-                }}
-              >
-                <img src={item.image || "https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=500"} alt={item.name} style={{ width: "100%", height: "95px", objectFit: "cover" }} />
+              <div key={item._id} style={{ backgroundColor: isOut ? "#f5f5f4" : "#ffffff", borderRadius: "12px", overflow: "hidden", border: "1px solid #f5e6d3", display: "flex", flexDirection: "column", opacity: isOut ? 0.65 : 1 }}>
+                <img src={item.image || "https://via.placeholder.com/150"} alt={item.name} style={{ width: "100%", height: "95px", objectFit: "cover" }} />
                 <div style={{ padding: "8px", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-                  <h3 style={{ fontSize: "12px", fontWeight: "800", margin: "0 0 2px 0", color: "#1c1917", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {item.name}
-                  </h3>
-                  <span style={{ fontSize: "10px", color: "#78716c", fontWeight: "500", marginBottom: "6px" }}>{item.category}</span>
-
+                  <h3 style={{ fontSize: "12px", fontWeight: "800", margin: "0 0 2px 0", color: "#1c1917" }}>{item.name}</h3>
+                  <span style={{ fontSize: "10px", color: "#78716c", marginBottom: "6px" }}>{item.category}</span>
                   <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: "13px", fontWeight: "800", color: "#dc2626" }}>₹{item.price}</span>
-                    <button
-                      disabled={isOut}
-                      onClick={() => addToCart(item)}
-                      style={{
-                        padding: "3px 9px",
-                        backgroundColor: isOut ? "#9ca3af" : "#dc2626",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "6px",
-                        fontWeight: "800",
-                        fontSize: "11px",
-                        cursor: isOut ? "not-allowed" : "pointer"
-                      }}
-                    >
+                    <button disabled={isOut} onClick={() => addToCart(item)} style={{ padding: "4px 10px", backgroundColor: isOut ? "#9ca3af" : "#dc2626", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "11px", cursor: isOut ? "not-allowed" : "pointer" }}>
                       {isOut ? "Sold Out" : "+ Add"}
                     </button>
                   </div>
@@ -420,19 +464,19 @@ const CustomerView = () => {
           })}
         </div>
 
-        {/* Floating Cart */}
+        {/* Active Round Cart */}
         {cart.length > 0 && (
           <div style={{ position: "sticky", bottom: "8px", backgroundColor: "#1c1917", color: "#ffffff", padding: "12px", borderRadius: "14px", zIndex: 40, boxShadow: "0 8px 25px rgba(0,0,0,0.3)" }}>
-            <h4 style={{ margin: "0 0 8px 0", fontSize: "12px", fontWeight: "800" }}>🛒 Current Order (Table #{tableNumber})</h4>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "12px", fontWeight: "800" }}>🛒 Current Selection</h4>
             <div style={{ maxHeight: "80px", overflowY: "auto", marginBottom: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
               {cart.map((item) => (
-                <div key={item._id} style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#f5f5f4" }}>
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "120px" }}>{item.name}</span>
+                <div key={item._id} style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+                  <span>{item.name}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <button onClick={() => updateQuantity(item._id, -1)} style={{ backgroundColor: "#44403c", color: "#fff", border: "none", width: "18px", height: "18px", borderRadius: "4px", fontWeight: "700" }}>-</button>
-                    <span style={{ fontWeight: "700" }}>{item.quantity}</span>
-                    <button onClick={() => updateQuantity(item._id, 1)} style={{ backgroundColor: "#44403c", color: "#fff", border: "none", width: "18px", height: "18px", borderRadius: "4px", fontWeight: "700" }}>+</button>
-                    <span style={{ fontWeight: "800", marginLeft: "4px", color: "#f59e0b" }}>₹{item.price * item.quantity}</span>
+                    <button onClick={() => updateQuantity(item._id, -1)} style={{ backgroundColor: "#44403c", color: "#fff", border: "none", width: "18px", borderRadius: "4px" }}>-</button>
+                    <span>{item.quantity}</span>
+                    <button onClick={() => updateQuantity(item._id, 1)} style={{ backgroundColor: "#44403c", color: "#fff", border: "none", width: "18px", borderRadius: "4px" }}>+</button>
+                    <span style={{ color: "#f59e0b", fontWeight: "800" }}>₹{item.price * item.quantity}</span>
                   </div>
                 </div>
               ))}
@@ -440,21 +484,58 @@ const CustomerView = () => {
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #44403c", paddingTop: "8px" }}>
               <div>
-                <span style={{ fontSize: "10px", color: "#a8a29e" }}>Total Bill</span>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: "#f59e0b" }}>₹{cartTotal}</div>
+                <span style={{ fontSize: "10px", color: "#a8a29e" }}>Round Total</span>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#f59e0b" }}>₹{cartTotal}</div>
               </div>
-              <button
-                disabled={submitting}
-                onClick={handlePlaceOrder}
-                style={{ padding: "8px 16px", backgroundColor: "#dc2626", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "12px", cursor: submitting ? "not-allowed" : "pointer" }}
-              >
-                {submitting ? "Placing..." : "Place Order 🚀"}
+              <button disabled={submitting} onClick={handlePlaceOrder} style={{ padding: "8px 16px", backgroundColor: "#dc2626", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
+                {submitting ? "Sending..." : "Send to Kitchen 🚀"}
               </button>
             </div>
           </div>
         )}
 
       </div>
+
+      {/* 🏁 FLOATING "END MEAL & PAY BILL" BUTTON */}
+      {tableOrders.length > 0 && (
+        <button
+          onClick={() => setShowEndMealModal(true)}
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "20px",
+            padding: "12px 20px",
+            backgroundColor: activeUnpaidOrders.length > 0 ? "#16a34a" : "#2563eb",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "30px",
+            fontWeight: "900",
+            fontSize: "12px",
+            boxShadow: "0 6px 20px rgba(0, 0, 0, 0.25)",
+            cursor: "pointer",
+            zIndex: 90,
+            display: "flex",
+            alignItems: "center",
+            gap: "8px"
+          }}
+        >
+          <Flag size={18} /> {activeUnpaidOrders.length > 0 ? "End Meal & Pay Bill" : "View Invoice & Receipt"}
+        </button>
+      )}
+
+      {/* 🏁 STRICT END MEAL MODAL */}
+      {showEndMealModal && (
+        <EndMealModal
+          tableNumber={tableNumber}
+          tableOrders={tableOrders}
+          onClose={() => setShowEndMealModal(false)}
+          onResetSession={() => {
+            setShowEndMealModal(false);
+            setCart([]);
+            fetchTableOrders();
+          }}
+        />
+      )}
     </div>
   );
 };
