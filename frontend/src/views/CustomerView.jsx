@@ -4,13 +4,12 @@ import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronUp, Utensils, Sparkles, Flame, 
-  Printer, CheckCircle2, BellRing, Download, X, Flag, Lock 
+  BellRing, Download, X, Flag, Lock 
 } from "lucide-react";
 import Background3D from "../components/Background3D";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
 
-// 🔌 Socket Init with Explicit Transports & Credentials
 const socket = io(BACKEND_URL, {
   transports: ["websocket", "polling"],
   withCredentials: true
@@ -37,19 +36,17 @@ const playAddSound = () => {
 const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => {
   const [billRequested, setBillRequested] = useState(false);
 
-  // Filter ONLY unpaid active orders for the current dining session
-  const unpaidOrders = tableOrders.filter((o) =>
+  const unpaidOrders = (tableOrders || []).filter((o) =>
     ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
   );
 
-  // Check payment status
-  const isPaid = unpaidOrders.length === 0 && tableOrders.some((o) => o.status === "Paid");
+  const isPaid = unpaidOrders.length === 0 && (tableOrders || []).some((o) => o.status === "Paid");
 
   let currentSessionOrders = [];
   if (unpaidOrders.length > 0) {
     currentSessionOrders = unpaidOrders;
   } else if (isPaid) {
-    const paidOrders = tableOrders.filter((o) => o.status === "Paid");
+    const paidOrders = (tableOrders || []).filter((o) => o.status === "Paid");
     if (paidOrders.length > 0) {
       const latestTime = new Date(paidOrders[0].updatedAt || paidOrders[0].createdAt).getTime();
       currentSessionOrders = paidOrders.filter((o) => {
@@ -59,7 +56,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
     }
   }
 
-  // Calculate items for current session only
   const activeItems = currentSessionOrders
     .filter((o) => o.status !== "Cancelled")
     .flatMap((o) => o.items || [])
@@ -132,7 +128,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
           <X size={18} color="#44403c" />
         </button>
 
-        {/* Header & Status */}
         <div style={{ textAlign: "center", marginBottom: "14px" }}>
           <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", fontWeight: "900", color: "#1c1917" }}>
             🧾 Table #{tableNumber} Bill Summary
@@ -148,7 +143,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
           </div>
         </div>
 
-        {/* Itemized Breakdown */}
         <div style={{ maxHeight: "180px", overflowY: "auto", marginBottom: "12px", borderTop: "1px dashed #f5e6d3", paddingTop: "8px" }}>
           {activeItems.length === 0 ? (
             <p style={{ fontSize: "12px", color: "#78716c", textAlign: "center", padding: "10px" }}>No active dishes ordered.</p>
@@ -162,7 +156,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
           )}
         </div>
 
-        {/* Financial Totals */}
         <div style={{ backgroundColor: "#faf6f0", padding: "12px", borderRadius: "10px", marginBottom: "16px", border: "1px solid #f5e6d3" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#78716c", marginBottom: "2px" }}>
             <span>Subtotal</span>
@@ -178,7 +171,6 @@ const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => 
           </div>
         </div>
 
-        {/* Actions based on payment status */}
         {!isPaid ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <button onClick={handleRequestBill} disabled={billRequested} style={{ width: "100%", padding: "12px", backgroundColor: billRequested ? "#16a34a" : "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "12px", cursor: billRequested ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
@@ -222,6 +214,19 @@ const CustomerView = () => {
   const [tableOrders, setTableOrders] = useState([]);
   const [showEndMealModal, setShowEndMealModal] = useState(false);
 
+  // Settings State
+  const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/settings`);
+      const data = await res.json();
+      if (data.success) setSettings(data.data);
+    } catch (err) {
+      console.error("Error fetching settings:", err);
+    }
+  };
+
   const fetchMenu = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/menu`);
@@ -250,17 +255,50 @@ const CustomerView = () => {
   };
 
   useEffect(() => {
+    fetchSettings();
     fetchMenu();
     fetchTableOrders();
 
     socket.on("menu_updated", fetchMenu);
     socket.on("order_updated", fetchTableOrders);
+    socket.on("settings_updated", fetchSettings);
 
     return () => {
-      socket.off("menu_updated");
-      socket.off("order_updated");
+      socket.off("menu_updated", fetchMenu);
+      socket.off("order_updated", fetchTableOrders);
+      socket.off("settings_updated", fetchSettings);
     };
   }, [tableNumber]);
+
+  if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
+
+  // 🛑 Store Closed Guard Screen
+  if (!settings.isRestaurantOpen) {
+    return (
+      <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#090807", color: "#fff", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+        <h1 style={{ fontSize: "36px", color: "#ef4444", fontWeight: "900", margin: "0 0 10px 0" }}>🛑 RESTAURANT CLOSED TODAY</h1>
+        <p style={{ color: "#d6d3d1", fontSize: "14px", maxWidth: "350px" }}>
+          We are currently on a holiday! We will be back soon to serve you freshly prepared gourmet bowls.
+        </p>
+      </div>
+    );
+  }
+
+  // ⚠️ Table Out-of-Service Guard Screen
+  if (settings.disabledTables?.includes(Number(tableNumber))) {
+    return (
+      <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#faf6f0", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+        <h2 style={{ fontSize: "24px", color: "#dc2626", fontWeight: "900", margin: "0 0 10px 0" }}>⚠️ Table #{tableNumber} Out of Service</h2>
+        <p style={{ color: "#78716c", fontSize: "13px", maxWidth: "350px" }}>
+          This table is currently unavailable due to maintenance. Please scan the QR code on a vacant table.
+        </p>
+      </div>
+    );
+  }
+
+  const activeUnpaidOrders = tableOrders.filter((o) =>
+    ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
+  );
 
   const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
 
@@ -332,12 +370,6 @@ const CustomerView = () => {
       setSubmitting(false);
     }
   };
-
-  if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
-
-  const activeUnpaidOrders = tableOrders.filter((o) =>
-    ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
-  );
 
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
@@ -429,20 +461,30 @@ const CustomerView = () => {
           </div>
         </div>
 
-        {/* Live Active Orders Tracker Banner */}
-        {activeUnpaidOrders.length > 0 && (
-          <div style={{ backgroundColor: "#1c1917", color: "#fff", padding: "10px 14px", borderRadius: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <span style={{ fontSize: "10px", color: "#a8a29e" }}>Active Dining Orders ({activeUnpaidOrders.length} rounds placed)</span>
-              <div style={{ fontSize: "12px", fontWeight: "700", color: "#f59e0b" }}>
-                Latest Status: {activeUnpaidOrders[activeUnpaidOrders.length - 1].status === "Pending" ? "⏳ Sent to Kitchen" : activeUnpaidOrders[activeUnpaidOrders.length - 1].status === "Preparing" ? "🍳 Cooking in Progress" : "🍽️ Served!"}
-              </div>
-            </div>
-            <span style={{ fontSize: "11px", backgroundColor: "#334155", padding: "4px 8px", borderRadius: "6px", fontWeight: "700" }}>
-              Order More Below 👇
+        {/* 🔴 LIVE TABLE OCCUPIED BANNER */}
+        <div style={{
+          backgroundColor: activeUnpaidOrders.length > 0 ? "#fef2f2" : "#f0fdf4",
+          border: activeUnpaidOrders.length > 0 ? "1px solid #fca5a5" : "1px solid #86efac",
+          padding: "8px 12px",
+          borderRadius: "10px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "900", color: activeUnpaidOrders.length > 0 ? "#dc2626" : "#16a34a" }}>
+              {activeUnpaidOrders.length > 0 ? "🔴 Table Occupied" : "🟢 Table Vacant"}
+            </span>
+            <span style={{ fontSize: "11px", color: "#78716c" }}>
+              ({activeUnpaidOrders.length > 0 ? `${activeUnpaidOrders.length} Active Round(s)` : "Ready for order"})
             </span>
           </div>
-        )}
+          {activeUnpaidOrders.length > 0 && (
+            <span style={{ fontSize: "12px", fontWeight: "800", color: "#dc2626" }}>
+              Running: ₹{activeUnpaidOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0)}
+            </span>
+          )}
+        </div>
 
         {/* Food Items Grid */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "10px" }}>

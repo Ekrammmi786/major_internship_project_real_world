@@ -8,13 +8,11 @@ const UPLOAD_PRESET = "order_app";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
 
-// 🔌 Socket Init with Explicit Transports & Credentials
 const socket = io(BACKEND_URL, {
   transports: ["websocket", "polling"],
   withCredentials: true
 });
 
-// 🔔 Loud Kitchen Chime Sound
 const playKitchenChime = () => {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -61,6 +59,9 @@ const AdminView = () => {
   const [confirmPaymentModal, setConfirmPaymentModal] = useState(null);
   const [discountInput, setDiscountInput] = useState(0);
 
+  // Settings State
+  const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
+
   // Kitchen States
   const [isKitchenStarted, setIsKitchenStarted] = useState(false);
   const [kitchenSubTab, setKitchenSubTab] = useState("Active");
@@ -68,6 +69,41 @@ const AdminView = () => {
   const [formData, setFormData] = useState({
     name: "", category: "Rice Bowls", price: "", image: "", isAvailable: true
   });
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/settings`);
+      const data = await res.json();
+      if (data.success) setSettings(data.data);
+    } catch (err) {
+      console.error("Error fetching settings:", err);
+    }
+  };
+
+  const updateSettings = async (newSettings) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSettings)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettings(data.data);
+        socket.emit("settings_updated");
+      }
+    } catch (err) {
+      console.error("Error updating settings:", err);
+    }
+  };
+
+  const toggleTableDisable = (tableNum) => {
+    const currentDisabled = settings.disabledTables || [];
+    const updated = currentDisabled.includes(tableNum)
+      ? currentDisabled.filter((t) => t !== tableNum)
+      : [...currentDisabled, tableNum];
+    updateSettings({ ...settings, disabledTables: updated });
+  };
 
   const fetchData = async () => {
     try {
@@ -89,6 +125,7 @@ const AdminView = () => {
 
   useEffect(() => {
     fetchData();
+    fetchSettings();
 
     const handleOrderUpdate = () => {
       fetchData();
@@ -97,9 +134,12 @@ const AdminView = () => {
 
     socket.on("order_updated", handleOrderUpdate);
     socket.on("menu_updated", fetchData);
+    socket.on("settings_updated", fetchSettings);
+
     return () => {
       socket.off("order_updated", handleOrderUpdate);
       socket.off("menu_updated", fetchData);
+      socket.off("settings_updated", fetchSettings);
     };
   }, [isKitchenStarted]);
 
@@ -317,6 +357,39 @@ const AdminView = () => {
   return (
     <div style={{ padding: "12px", maxWidth: "1100px", margin: "0 auto", fontFamily: "sans-serif" }}>
       
+      {/* ⚙️ STORE CONTROLS PANEL */}
+      <div style={{ backgroundColor: "#fff", padding: "14px", borderRadius: "12px", marginBottom: "16px", border: "1px solid #e7e5e4" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800" }}>⚙️ Store Controls</h4>
+          <button
+            onClick={() => updateSettings({ ...settings, isRestaurantOpen: !settings.isRestaurantOpen })}
+            style={{ padding: "8px 16px", backgroundColor: settings.isRestaurantOpen ? "#16a34a" : "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}
+          >
+            {settings.isRestaurantOpen ? "🟢 STORE OPEN (Click for Holiday Mode)" : "🛑 HOLIDAY MODE (Store Closed)"}
+          </button>
+        </div>
+
+        <div>
+          <span style={{ fontSize: "11px", fontWeight: "700", color: "#78716c", display: "block", marginBottom: "6px" }}>
+            Disable Specific Tables (Maintenance):
+          </span>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
+              const isDisabled = settings.disabledTables?.includes(n);
+              return (
+                <button
+                  key={n}
+                  onClick={() => toggleTableDisable(n)}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "none", fontWeight: "700", fontSize: "11px", cursor: "pointer", backgroundColor: isDisabled ? "#fee2e2" : "#dcfce7", color: isDisabled ? "#dc2626" : "#15803d" }}
+                >
+                  Table #{n} {isDisabled ? "🚫 Disabled" : "✅ Active"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
       {/* Accounting Metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: "16px" }}>
         <div style={{ backgroundColor: "#ffffff", padding: "12px", borderRadius: "12px", border: "1px solid #f5e6d3" }}>
