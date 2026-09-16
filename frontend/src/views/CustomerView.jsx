@@ -33,29 +33,23 @@ const playAddSound = () => {
 };
 
 // 🏁 STRICT END MEAL & ACCURATE BILL MODAL
-const EndMealModal = ({ tableNumber, tableOrders, onClose, onResetSession }) => {
+const EndMealModal = ({ tableNumber, tableOrders, sessionOrderIds, onClose, onResetSession }) => {
   const [billRequested, setBillRequested] = useState(false);
 
+  // Active unpaid orders for this table
   const unpaidOrders = (tableOrders || []).filter((o) =>
     ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
   );
 
-  const isPaid = unpaidOrders.length === 0 && (tableOrders || []).some((o) => o.status === "Paid");
+  // Paid orders belonging ONLY to current user session
+  const paidSessionOrders = (tableOrders || []).filter((o) =>
+    o.status === "Paid" && sessionOrderIds.includes(o._id || o.id)
+  );
 
-  let currentSessionOrders = [];
-  if (unpaidOrders.length > 0) {
-    currentSessionOrders = unpaidOrders;
-  } else if (isPaid) {
-    const paidOrders = (tableOrders || []).filter((o) => o.status === "Paid");
-    if (paidOrders.length > 0) {
-      const latestTime = new Date(paidOrders[0].updatedAt || paidOrders[0].createdAt).getTime();
-      currentSessionOrders = paidOrders.filter((o) => {
-        const t = new Date(o.updatedAt || o.createdAt).getTime();
-        return Math.abs(latestTime - t) < 15 * 60 * 1000;
-      });
-    }
-  }
+  const isPaid = unpaidOrders.length === 0 && paidSessionOrders.length > 0;
+  const currentSessionOrders = unpaidOrders.length > 0 ? unpaidOrders : paidSessionOrders;
 
+  // Calculate active session items
   const activeItems = currentSessionOrders
     .filter((o) => o.status !== "Cancelled")
     .flatMap((o) => o.items || [])
@@ -213,18 +207,33 @@ const CustomerView = () => {
   
   const [tableOrders, setTableOrders] = useState([]);
   const [showEndMealModal, setShowEndMealModal] = useState(false);
-
-  // Settings State
   const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
+
+  // Session-based Order ID tracking (prevents past orders from leaking to new customers)
+  const [sessionOrderIds, setSessionOrderIds] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(`session_orders_${urlTable}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(`session_orders_${tableNumber}`);
+      setSessionOrderIds(saved ? JSON.parse(saved) : []);
+    } catch (e) {
+      setSessionOrderIds([]);
+    }
+  }, [tableNumber]);
 
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/settings`);
       const data = await res.json();
       if (data.success) setSettings(data.data);
-    } catch (err) {
-      console.error("Error fetching settings:", err);
-    }
+    } catch (err) {}
   };
 
   const fetchMenu = async () => {
@@ -272,7 +281,7 @@ const CustomerView = () => {
 
   if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
 
-  // 🛑 Store Closed Guard Screen
+  // Store Closed & Maintenance Guard Screens
   if (!settings.isRestaurantOpen) {
     return (
       <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#090807", color: "#fff", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
@@ -284,7 +293,6 @@ const CustomerView = () => {
     );
   }
 
-  // ⚠️ Table Out-of-Service Guard Screen
   if (settings.disabledTables?.includes(Number(tableNumber))) {
     return (
       <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#faf6f0", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
@@ -299,6 +307,13 @@ const CustomerView = () => {
   const activeUnpaidOrders = tableOrders.filter((o) =>
     ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
   );
+
+  const paidSessionOrders = tableOrders.filter((o) =>
+    o.status === "Paid" && sessionOrderIds.includes(o._id || o.id)
+  );
+
+  // Show floating button ONLY if there is an active meal or current session paid order
+  const showFloatingButton = activeUnpaidOrders.length > 0 || paidSessionOrders.length > 0;
 
   const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
 
@@ -359,6 +374,12 @@ const CustomerView = () => {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        const createdId = data.data?._id || data.data?.id;
+        if (createdId) {
+          const updatedSessionIds = [...sessionOrderIds, createdId];
+          setSessionOrderIds(updatedSessionIds);
+          sessionStorage.setItem(`session_orders_${tableNumber}`, JSON.stringify(updatedSessionIds));
+        }
         setCart([]);
         socket.emit("order_updated");
         fetchTableOrders();
@@ -375,7 +396,7 @@ const CustomerView = () => {
     <div style={{ position: "relative", minHeight: "100vh" }}>
       <Background3D />
 
-      {/* 🚀 SPLASH SCREEN OVERLAY */}
+      {/* SPLASH SCREEN OVERLAY */}
       <AnimatePresence>
         {!hasSwipedUp && (
           <motion.div
@@ -429,8 +450,8 @@ const CustomerView = () => {
         )}
       </AnimatePresence>
 
-      {/* 📱 MAIN MENU CONTENT */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "10px", maxWidth: "1100px", margin: "0 auto", paddingBottom: tableOrders.length > 0 ? "130px" : "80px" }}>
+      {/* MAIN MENU CONTENT */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "10px", maxWidth: "1100px", margin: "0 auto", paddingBottom: showFloatingButton ? "130px" : "80px" }}>
         
         {/* Header Bar */}
         <div style={{ backgroundColor: "rgba(255, 255, 255, 0.92)", backdropFilter: "blur(10px)", padding: "12px", borderRadius: "14px", border: "1px solid #f5e6d3" }}>
@@ -461,7 +482,7 @@ const CustomerView = () => {
           </div>
         </div>
 
-        {/* 🔴 LIVE TABLE OCCUPIED BANNER */}
+        {/* LIVE TABLE OCCUPIED BANNER */}
         <div style={{
           backgroundColor: activeUnpaidOrders.length > 0 ? "#fef2f2" : "#f0fdf4",
           border: activeUnpaidOrders.length > 0 ? "1px solid #fca5a5" : "1px solid #86efac",
@@ -540,8 +561,8 @@ const CustomerView = () => {
 
       </div>
 
-      {/* 🏁 FLOATING "END MEAL & PAY BILL" BUTTON */}
-      {tableOrders.length > 0 && (
+      {/* FLOATING BUTTON (Only visible for active ordering sessions) */}
+      {showFloatingButton && (
         <button
           onClick={() => setShowEndMealModal(true)}
           style={{
@@ -567,15 +588,18 @@ const CustomerView = () => {
         </button>
       )}
 
-      {/* 🏁 STRICT END MEAL MODAL */}
+      {/* STRICT END MEAL MODAL */}
       {showEndMealModal && (
         <EndMealModal
           tableNumber={tableNumber}
           tableOrders={tableOrders}
+          sessionOrderIds={sessionOrderIds}
           onClose={() => setShowEndMealModal(false)}
           onResetSession={() => {
             setShowEndMealModal(false);
             setCart([]);
+            setSessionOrderIds([]);
+            sessionStorage.removeItem(`session_orders_${tableNumber}`);
             fetchTableOrders();
           }}
         />
