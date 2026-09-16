@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 
 import orderRoutes from "./routes/order.Routes.js";
 import menuRoutes from "./routes/menu.Routes.js";
-import settingRoutes from "./routes/setting.Routes.js";
+import settingRoutes from "./routes/settings.routes.js";
 
 dotenv.config();
 
