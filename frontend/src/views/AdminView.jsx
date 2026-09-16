@@ -344,7 +344,7 @@ const AdminView = () => {
     .filter((o) => o.paymentMethod && (o.paymentMethod.toLowerCase() === "upi" || o.paymentMethod.toLowerCase() === "qr"))
     .reduce((sum, o) => sum + getOrderTotal(o), 0);
 
-  const activeUnpaidOrders = orders.filter((o) => o.status !== "Paid");
+  const activeUnpaidOrders = orders.filter((o) => o.status !== "Paid" && o.status !== "Cancelled");
   const kitchenOrders = orders.filter((o) => {
     if (kitchenSubTab === "Active") return ["Pending", "Preparing", "Ready"].includes(o.status);
     if (kitchenSubTab === "Served") return o.status === "Served";
@@ -410,7 +410,7 @@ const AdminView = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs Navigation */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button onClick={() => setActiveTab("billing")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "billing" ? "#dc2626" : "#e7e5e4", color: activeTab === "billing" ? "#fff" : "#44403c", fontSize: "12px" }}>
@@ -443,10 +443,11 @@ const AdminView = () => {
             activeUnpaidOrders.map((order) => {
               const targetId = order._id || order.id;
               const total = getOrderTotal(order);
+              const displayTableNo = order.tableNumber || order.table || order.tableNo || "N/A";
               return (
                 <div key={targetId} style={{ backgroundColor: "#fff", padding: "12px", borderRadius: "12px", border: "1px solid #f5e6d3", display: "flex", flexDirection: "column" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", backgroundColor: "#faf6f0", padding: "6px 10px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
-                    <span style={{ fontSize: "18px", fontWeight: "900", color: "#dc2626" }}>TABLE #{order.tableNumber}</span>
+                    <span style={{ fontSize: "16px", fontWeight: "900", color: "#dc2626" }}>TABLE #{displayTableNo}</span>
                     <span style={{ fontSize: "10px", fontWeight: "800", color: "#d97706", backgroundColor: "#fef3c7", padding: "2px 6px", borderRadius: "4px" }}>{order.status}</span>
                   </div>
 
@@ -464,10 +465,10 @@ const AdminView = () => {
                   </div>
 
                   <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: order.tableNumber, amount: total, paymentMethod: "Cash" })} style={{ flex: 1, padding: "6px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
+                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "Cash" })} style={{ flex: 1, padding: "6px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
                       💵 Cash
                     </button>
-                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: order.tableNumber, amount: total, paymentMethod: "UPI" })} style={{ flex: 1, padding: "6px", backgroundColor: "#0284c7", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
+                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "UPI" })} style={{ flex: 1, padding: "6px", backgroundColor: "#0284c7", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
                       📱 UPI / QR
                     </button>
                   </div>
@@ -513,7 +514,7 @@ const AdminView = () => {
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
             {kitchenOrders.length === 0 ? (
               <div style={{ padding: "30px", gridColumn: "1/-1", textAlign: "center", color: "#78716c", fontWeight: "600" }}>
                 No orders in {kitchenSubTab} queue.
@@ -527,32 +528,39 @@ const AdminView = () => {
                 const isServed = order.status === "Served";
                 const isCancelled = order.status === "Cancelled";
 
+                const displayTableNo = order.tableNumber || order.table || order.tableNo || "N/A";
+
                 return (
                   <div
                     key={targetId}
                     style={{
-                      backgroundColor: "#fff", borderRadius: "10px", border: isCancelled ? "2px solid #ef4444" : isReady ? "2px solid #0284c7" : isPreparing ? "2px solid #f59e0b" : "1px solid #e7e5e4",
-                      padding: "12px", display: "flex", flexDirection: "column"
+                      backgroundColor: "#fff", borderRadius: "12px", border: isCancelled ? "2px solid #ef4444" : isReady ? "2px solid #0284c7" : isPreparing ? "2px solid #f59e0b" : "1px solid #e7e5e4",
+                      padding: "14px", display: "flex", flexDirection: "column", boxShadow: "0 4px 12px rgba(0,0,0,0.05)"
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", borderBottom: "1px solid #f5e6d3", paddingBottom: "6px" }}>
-                      <span style={{ fontSize: "16px", fontWeight: "900", color: "#dc2626" }}>TABLE #{order.tableNumber}</span>
-                      <span style={{ fontSize: "10px", fontWeight: "800", padding: "2px 6px", borderRadius: "4px", backgroundColor: isCancelled ? "#fee2e2" : isReady ? "#e0f2fe" : isPreparing ? "#fef3c7" : "#dcfce7", color: isCancelled ? "#dc2626" : isReady ? "#0369a1" : isPreparing ? "#d97706" : "#15803d" }}>
+                    {/* 🍽️ PROMINENT RED TABLE BADGE */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid #f5e6d3", paddingBottom: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "16px", fontWeight: "900", color: "#ffffff", backgroundColor: "#dc2626", padding: "4px 10px", borderRadius: "8px", letterSpacing: "0.5px" }}>
+                          🍽️ TABLE #{displayTableNo}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: "11px", fontWeight: "800", padding: "4px 8px", borderRadius: "6px", backgroundColor: isCancelled ? "#fee2e2" : isReady ? "#e0f2fe" : isPreparing ? "#fef3c7" : "#dcfce7", color: isCancelled ? "#dc2626" : isReady ? "#0369a1" : isPreparing ? "#d97706" : "#15803d" }}>
                         {order.status}
                       </span>
                     </div>
 
-                    <ul style={{ paddingLeft: "16px", fontSize: "12px", margin: "0 0 10px 0", color: "#334155", flexGrow: 1 }}>
+                    <ul style={{ paddingLeft: "16px", fontSize: "13px", margin: "0 0 12px 0", color: "#334155", flexGrow: 1 }}>
                       {order.items?.map((item, idx) => {
                         const isItemCancelled = item.status === "Cancelled";
                         return (
-                          <li key={idx} style={{ textDecoration: isItemCancelled ? "line-through" : "none", color: isItemCancelled ? "#94a3b8" : "#334155", marginBottom: "4px" }}>
+                          <li key={idx} style={{ textDecoration: isItemCancelled ? "line-through" : "none", color: isItemCancelled ? "#94a3b8" : "#334155", marginBottom: "6px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <span><strong>{item.name}</strong> × {item.quantity}</span>
                               {!isItemCancelled && !isServed && !isCancelled && (
                                 <button
                                   onClick={() => handleCancelItem(targetId, idx)}
-                                  style={{ backgroundColor: "transparent", color: "#ef4444", border: "1px solid #fee2e2", borderRadius: "4px", padding: "1px 4px", fontSize: "9px", cursor: "pointer" }}
+                                  style={{ backgroundColor: "transparent", color: "#ef4444", border: "1px solid #fee2e2", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", cursor: "pointer" }}
                                 >
                                   ❌ Cancel
                                 </button>
@@ -565,19 +573,19 @@ const AdminView = () => {
 
                     <div style={{ marginTop: "auto", borderTop: "1px dashed #e7e5e4", paddingTop: "8px" }}>
                       {isPending && !isCancelled && (
-                        <button onClick={() => updateOrderStatus(targetId, "Preparing")} style={{ width: "100%", padding: "8px", backgroundColor: "#f59e0b", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "11px", cursor: "pointer" }}>
+                        <button onClick={() => updateOrderStatus(targetId, "Preparing")} style={{ width: "100%", padding: "8px", backgroundColor: "#f59e0b", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
                           👨‍🍳 Start Cooking
                         </button>
                       )}
 
                       {isPreparing && !isCancelled && (
-                        <button onClick={() => updateOrderStatus(targetId, "Ready")} style={{ width: "100%", padding: "8px", backgroundColor: "#0284c7", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "11px", cursor: "pointer" }}>
+                        <button onClick={() => updateOrderStatus(targetId, "Ready")} style={{ width: "100%", padding: "8px", backgroundColor: "#0284c7", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
                           🔔 Ready to Serve
                         </button>
                       )}
 
                       {isReady && !isCancelled && (
-                        <button onClick={() => updateOrderStatus(targetId, "Served")} style={{ width: "100%", padding: "8px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "11px", cursor: "pointer" }}>
+                        <button onClick={() => updateOrderStatus(targetId, "Served")} style={{ width: "100%", padding: "8px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "12px", cursor: "pointer" }}>
                           ✅ Mark as Served
                         </button>
                       )}
@@ -625,6 +633,7 @@ const AdminView = () => {
                   const cgst = (total * 0.025).toFixed(2);
                   const sgst = (total * 0.025).toFixed(2);
                   const itemsSummary = order.items?.map((i) => `${i.name} (x${i.quantity})`).join(", ");
+                  const displayTableNo = order.tableNumber || order.table || order.tableNo || "N/A";
 
                   return (
                     <tr key={targetId} style={{ borderBottom: "1px solid #f0edf6" }}>
@@ -634,7 +643,7 @@ const AdminView = () => {
                       <td style={{ padding: "10px 8px", color: "#44403c" }}>
                         {new Date(order.updatedAt || order.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </td>
-                      <td style={{ padding: "10px 8px", fontWeight: "800" }}>#{order.tableNumber}</td>
+                      <td style={{ padding: "10px 8px", fontWeight: "800" }}>#{displayTableNo}</td>
                       <td style={{ padding: "10px 8px", maxWidth: "200px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#57534e" }}>
                         {itemsSummary}
                       </td>
