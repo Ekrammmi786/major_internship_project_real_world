@@ -8,9 +8,14 @@ import mongoose from "mongoose";
 import orderRoutes from "./routes/order.Routes.js";
 import menuRoutes from "./routes/menu.Routes.js";
 import settingRoutes from "./routes/settings.routes.js";
+import dns from "dns";
 
 dotenv.config();
 
+dns.setServers([
+  "1.1.1.1",
+  "8.8.8.8"
+])
 const app = express();
 const server = http.createServer(app);
 
@@ -26,7 +31,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
 app.use(express.json());
 
 // 🔌 Socket.io Setup
