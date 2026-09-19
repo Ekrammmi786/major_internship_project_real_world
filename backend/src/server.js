@@ -4,11 +4,11 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import dns from "dns";
+
 import orderRoutes from "./routes/order.Routes.js";
 import menuRoutes from "./routes/menu.Routes.js";
 import settingRoutes from "./routes/settings.routes.js";
-
+import dns from "dns";
 dns.setServers([
   "1.1.1.1",
   "8.8.8.8"
@@ -64,12 +64,10 @@ io.on("connection", (socket) => {
     io.emit("settings_updated");
   });
 
-  // 🚨 Delay Complaint Socket Event
   socket.on("customer_complaint", (data) => {
     io.emit("admin_alert", data);
   });
 
-  // 🔄 Session Reset Broadcast Event
   socket.on("session_reset", (data) => {
     io.emit("session_reset", data);
   });

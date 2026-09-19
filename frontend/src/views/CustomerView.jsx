@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronUp, Utensils, Sparkles, Flame, 
-  BellRing, Download, X, Lock, AlertTriangle 
+  BellRing, Download, X, Lock, AlertTriangle, ShieldAlert, RefreshCw 
 } from "lucide-react";
 import Background3D from "../components/Background3D";
 
@@ -190,7 +190,7 @@ const EndMealModal = ({ tableNumber, tableOrders, sessionOrderIds, onClose, onRe
 
 // 📱 MAIN CUSTOMER VIEW
 const CustomerView = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlTable = searchParams.get("table") || "1";
 
   const [hasSwipedUp, setHasSwipedUp] = useState(false);
@@ -204,6 +204,10 @@ const CustomerView = () => {
   
   const [tableOrders, setTableOrders] = useState([]);
   const [showEndMealModal, setShowEndMealModal] = useState(false);
+  const [showTableSelectModal, setShowTableSelectModal] = useState(false);
+  const [isTableLocked, setIsTableLocked] = useState(false);
+  const [allActiveOrders, setAllActiveOrders] = useState([]);
+  
   const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
 
   const [sessionOrderIds, setSessionOrderIds] = useState(() => {
@@ -245,21 +249,41 @@ const CustomerView = () => {
     }
   };
 
-  // 🔒 STRICT TABLE ORDER FETCHING & FAIL-SAFE AUTO-CLEAR
+  // 🔒 STRICT TABLE ORDER FETCHING & SESSION LOCK CHECK
   const fetchTableOrders = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/orders`);
       const data = await res.json();
       const allOrders = data.success && Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
       
+      setAllActiveOrders(allOrders);
+
+      // Active unpaid orders on this table
       const activeUnpaidOrders = allOrders.filter(
         (o) => String(o.tableNumber) === String(tableNumber) && 
                ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
       );
 
+      // Check if Table is currently occupied by someone else
+      if (activeUnpaidOrders.length > 0) {
+        const savedSessionIds = sessionOrderIds || [];
+        const hasMatchingSession = activeUnpaidOrders.some((o) =>
+          savedSessionIds.includes(o._id || o.id)
+        );
+
+        if (!hasMatchingSession && savedSessionIds.length === 0) {
+          // Table occupied by OTHER customer -> LOCK IT!
+          setIsTableLocked(true);
+          setTableOrders([]);
+          return;
+        }
+      }
+
+      // If valid or user belongs to this session
+      setIsTableLocked(false);
       setTableOrders(activeUnpaidOrders);
 
-      // FAIL-SAFE: Agar table par koi Unpaid order active nahi hai, local session purge kar do
+      // Fail-safe auto purge
       if (activeUnpaidOrders.length === 0) {
         sessionStorage.removeItem(`session_orders_${tableNumber}`);
         setSessionOrderIds([]);
@@ -274,7 +298,6 @@ const CustomerView = () => {
     fetchMenu();
     fetchTableOrders();
 
-    // ⚡ AUTOMATIC SESSION RESET LISTENER
     const handleSessionReset = (data) => {
       if (String(data.tableNumber) === String(tableNumber)) {
         sessionStorage.removeItem(`session_orders_${tableNumber}`);
@@ -282,6 +305,7 @@ const CustomerView = () => {
         setCart([]);
         setTableOrders([]);
         setShowEndMealModal(false);
+        setIsTableLocked(false);
       }
     };
 
@@ -306,6 +330,13 @@ const CustomerView = () => {
     alert("🚨 Complaint sent directly to Admin & Kitchen Manager!");
   };
 
+  const handleSelectTable = (newTable) => {
+    setTableNumber(String(newTable));
+    setSearchParams({ table: String(newTable) });
+    setShowTableSelectModal(false);
+    setIsTableLocked(false);
+  };
+
   if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
 
   if (!settings.isRestaurantOpen) {
@@ -323,9 +354,68 @@ const CustomerView = () => {
     return (
       <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#faf6f0", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
         <h2 style={{ fontSize: "24px", color: "#dc2626", fontWeight: "900", margin: "0 0 10px 0" }}>⚠️ Table #{tableNumber} Out of Service</h2>
-        <p style={{ color: "#78716c", fontSize: "13px", maxWidth: "350px" }}>
-          This table is currently unavailable due to maintenance. Please scan the QR code on a vacant table.
+        <p style={{ color: "#78716c", fontSize: "13px", maxWidth: "350px", marginBottom: "16px" }}>
+          This table is currently unavailable due to maintenance. Please select a vacant table below.
         </p>
+        <button onClick={() => setShowTableSelectModal(true)} style={{ padding: "10px 20px", backgroundColor: "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", cursor: "pointer" }}>
+          🪑 Select Another Table
+        </button>
+      </div>
+    );
+  }
+
+  // 🔒 OCCUPIED TABLE LOCK SCREEN (Security Guard)
+  if (isTableLocked) {
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center", backgroundColor: "#090807", color: "#ffffff", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+        <div style={{ backgroundColor: "rgba(220, 38, 38, 0.15)", border: "1px solid rgba(220, 38, 38, 0.4)", padding: "20px", borderRadius: "20px", maxWidth: "380px" }}>
+          <ShieldAlert size={54} color="#ef4444" style={{ marginBottom: "12px" }} />
+          <h2 style={{ fontSize: "22px", fontWeight: "900", color: "#ef4444", margin: "0 0 8px 0" }}>
+            🔒 Table #{tableNumber} Currently Occupied
+          </h2>
+          <p style={{ fontSize: "13px", color: "#d6d3d1", lineHeight: "1.5", margin: "0 0 20px 0" }}>
+            Is table par abhi doosre guests baithe hain aur unka order chal raha hai. Aap kisi aur ki table ka order ya bill nahi dekh sakte.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <button onClick={() => setShowTableSelectModal(true)} style={{ width: "100%", padding: "12px", backgroundColor: "#dc2626", color: "#fff", border: "none", borderRadius: "10px", fontWeight: "800", fontSize: "13px", cursor: "pointer" }}>
+              🪑 Select Your Correct Table
+            </button>
+            <button onClick={fetchTableOrders} style={{ width: "100%", padding: "10px", backgroundColor: "#27272a", color: "#a1a1aa", border: "1px solid #3f3f46", borderRadius: "10px", fontWeight: "700", fontSize: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+              <RefreshCw size={14} /> Refresh Table Status
+            </button>
+          </div>
+        </div>
+
+        {/* Modal Selection Overlay */}
+        {showTableSelectModal && (
+          <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px" }}>
+            <div style={{ backgroundColor: "#18181b", borderRadius: "16px", width: "100%", maxWidth: "360px", padding: "20px", border: "1px solid #27272a" }}>
+              <h3 style={{ margin: "0 0 12px 0", color: "#fff", fontSize: "16px", fontWeight: "800" }}>🪑 Select Your Vacant Table</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "16px" }}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((num) => {
+                  const isOcc = allActiveOrders.some((o) => String(o.tableNumber) === String(num) && ["Pending", "Preparing", "Ready", "Served"].includes(o.status));
+                  return (
+                    <button
+                      key={num}
+                      onClick={() => handleSelectTable(num)}
+                      style={{
+                        padding: "12px", borderRadius: "10px", border: "none", fontWeight: "800", fontSize: "13px", cursor: "pointer",
+                        backgroundColor: isOcc ? "#27272a" : "#16a34a",
+                        color: isOcc ? "#71717a" : "#ffffff"
+                      }}
+                    >
+                      Table #{num} {isOcc ? "(Occupied)" : "🟢 Vacant"}
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={() => setShowTableSelectModal(false)} style={{ width: "100%", padding: "8px", backgroundColor: "#3f3f46", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -485,14 +575,9 @@ const CustomerView = () => {
               <h2 style={{ fontSize: "14px", fontWeight: "800", color: "#1c1917", margin: 0 }}>Gourmet Menu 🔥</h2>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#faf6f0", padding: "4px 8px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "#44403c" }}>Table:</label>
-              <select value={tableNumber} onChange={(e) => setTableNumber(e.target.value)} style={{ padding: "2px 4px", borderRadius: "4px", fontWeight: "800", fontSize: "12px", border: "1px solid #e7e5e4", backgroundColor: "#fff" }}>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                  <option key={n} value={n}>#{n}</option>
-                ))}
-              </select>
-            </div>
+            <button onClick={() => setShowTableSelectModal(true)} style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#faf6f0", padding: "6px 10px", borderRadius: "8px", border: "1px solid #f5e6d3", fontWeight: "800", fontSize: "12px", color: "#dc2626", cursor: "pointer" }}>
+              🪑 Table #{tableNumber} (Change)
+            </button>
           </div>
 
           <input type="text" placeholder="🔍 Search delicious dishes..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid #e7e5e4", fontSize: "12px", backgroundColor: "#faf6f0", marginBottom: "8px", boxSizing: "border-box" }} />
@@ -519,7 +604,7 @@ const CustomerView = () => {
           </div>
         )}
 
-        {/* Table Occupied Banner */}
+        {/* Table Status Banner */}
         <div style={{
           backgroundColor: activeUnpaidOrders.length > 0 ? "#fef2f2" : "#f0fdf4",
           border: activeUnpaidOrders.length > 0 ? "1px solid #fca5a5" : "1px solid #86efac",
@@ -527,7 +612,7 @@ const CustomerView = () => {
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span style={{ fontSize: "12px", fontWeight: "900", color: activeUnpaidOrders.length > 0 ? "#dc2626" : "#16a34a" }}>
-              {activeUnpaidOrders.length > 0 ? "🔴 Table Occupied" : "🟢 Table Vacant"}
+              {activeUnpaidOrders.length > 0 ? "🔴 Table Occupied by You" : "🟢 Table Vacant"}
             </span>
             <span style={{ fontSize: "11px", color: "#78716c" }}>
               ({activeUnpaidOrders.length > 0 ? `${activeUnpaidOrders.length} Active Round(s)` : "Ready for order"})
@@ -609,7 +694,7 @@ const CustomerView = () => {
         </button>
       )}
 
-      {/* MODAL */}
+      {/* BILL MODAL */}
       {showEndMealModal && (
         <EndMealModal
           tableNumber={tableNumber}
@@ -624,6 +709,37 @@ const CustomerView = () => {
             fetchTableOrders();
           }}
         />
+      )}
+
+      {/* TABLE SELECTOR MODAL */}
+      {showTableSelectModal && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", justifyContent: "center", alignItems: "center", padding: "16px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", width: "100%", maxWidth: "360px", padding: "20px", boxShadow: "0 10px 30px rgba(0,0,0,0.3)" }}>
+            <h3 style={{ margin: "0 0 12px 0", color: "#1c1917", fontSize: "16px", fontWeight: "800" }}>🪑 Select Your Vacant Table</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px", marginBottom: "16px" }}>
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((num) => {
+                const isOcc = allActiveOrders.some((o) => String(o.tableNumber) === String(num) && ["Pending", "Preparing", "Ready", "Served"].includes(o.status));
+                return (
+                  <button
+                    key={num}
+                    onClick={() => handleSelectTable(num)}
+                    style={{
+                      padding: "12px", borderRadius: "10px", border: "none", fontWeight: "800", fontSize: "12px", cursor: "pointer",
+                      backgroundColor: isOcc ? "#fee2e2" : "#dcfce7",
+                      color: isOcc ? "#dc2626" : "#15803d",
+                      border: isOcc ? "1px solid #fca5a5" : "1px solid #86efac"
+                    }}
+                  >
+                    Table #{num} {isOcc ? "(Occupied)" : "🟢 Vacant"}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setShowTableSelectModal(false)} style={{ width: "100%", padding: "8px", backgroundColor: "#f5f5f4", color: "#44403c", border: "none", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
