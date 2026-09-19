@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronUp, Utensils, Sparkles, Flame, 
-  BellRing, Download, X, Flag, Lock 
+  BellRing, Download, X, Lock, AlertTriangle 
 } from "lucide-react";
 import Background3D from "../components/Background3D";
 
@@ -32,16 +32,14 @@ const playAddSound = () => {
   } catch (err) {}
 };
 
-// 🏁 STRICT END MEAL & ACCURATE BILL MODAL
+// 🏁 BILL SUMMARY MODAL
 const EndMealModal = ({ tableNumber, tableOrders, sessionOrderIds, onClose, onResetSession }) => {
   const [billRequested, setBillRequested] = useState(false);
 
-  // Active unpaid orders for this table
   const unpaidOrders = (tableOrders || []).filter((o) =>
     ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
   );
 
-  // Paid orders belonging ONLY to current user session
   const paidSessionOrders = (tableOrders || []).filter((o) =>
     o.status === "Paid" && sessionOrderIds.includes(o._id || o.id)
   );
@@ -49,7 +47,6 @@ const EndMealModal = ({ tableNumber, tableOrders, sessionOrderIds, onClose, onRe
   const isPaid = unpaidOrders.length === 0 && paidSessionOrders.length > 0;
   const currentSessionOrders = unpaidOrders.length > 0 ? unpaidOrders : paidSessionOrders;
 
-  // Calculate active session items
   const activeItems = currentSessionOrders
     .filter((o) => o.status !== "Cancelled")
     .flatMap((o) => o.items || [])
@@ -209,7 +206,6 @@ const CustomerView = () => {
   const [showEndMealModal, setShowEndMealModal] = useState(false);
   const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
 
-  // Session-based Order ID tracking (prevents past orders from leaking to new customers)
   const [sessionOrderIds, setSessionOrderIds] = useState(() => {
     try {
       const saved = sessionStorage.getItem(`session_orders_${urlTable}`);
@@ -268,20 +264,40 @@ const CustomerView = () => {
     fetchMenu();
     fetchTableOrders();
 
+    // 🔄 AUTOMATIC SESSION RESET LISTENER (Admin Settle Payment)
+    const handleSessionReset = (data) => {
+      if (String(data.tableNumber) === String(tableNumber)) {
+        sessionStorage.removeItem(`session_orders_${tableNumber}`);
+        setSessionOrderIds([]);
+        setCart([]);
+        setTableOrders([]);
+        setShowEndMealModal(false);
+      }
+    };
+
     socket.on("menu_updated", fetchMenu);
     socket.on("order_updated", fetchTableOrders);
     socket.on("settings_updated", fetchSettings);
+    socket.on("session_reset", handleSessionReset);
 
     return () => {
       socket.off("menu_updated", fetchMenu);
       socket.off("order_updated", fetchTableOrders);
       socket.off("settings_updated", fetchSettings);
+      socket.off("session_reset", handleSessionReset);
     };
   }, [tableNumber]);
 
+  const handleDelayComplaint = () => {
+    socket.emit("customer_complaint", {
+      tableNumber,
+      message: `Table #${tableNumber} customer is reporting a delay! Food not served yet.`
+    });
+    alert("🚨 Complaint sent directly to Admin & Kitchen Manager!");
+  };
+
   if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#1c1917", fontWeight: "600" }}>Loading Menu...</div>;
 
-  // Store Closed & Maintenance Guard Screens
   if (!settings.isRestaurantOpen) {
     return (
       <div style={{ padding: "60px 20px", textAlign: "center", backgroundColor: "#090807", color: "#fff", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
@@ -312,9 +328,7 @@ const CustomerView = () => {
     o.status === "Paid" && sessionOrderIds.includes(o._id || o.id)
   );
 
-  // Show floating button ONLY if there is an active meal or current session paid order
   const showFloatingButton = activeUnpaidOrders.length > 0 || paidSessionOrders.length > 0;
-
   const categories = ["All", ...new Set(menuItems.map((item) => item.category))];
 
   const filteredItems = menuItems.filter((item) => {
@@ -396,7 +410,7 @@ const CustomerView = () => {
     <div style={{ position: "relative", minHeight: "100vh" }}>
       <Background3D />
 
-      {/* SPLASH SCREEN OVERLAY */}
+      {/* SPLASH SCREEN */}
       <AnimatePresence>
         {!hasSwipedUp && (
           <motion.div
@@ -450,7 +464,7 @@ const CustomerView = () => {
         )}
       </AnimatePresence>
 
-      {/* MAIN MENU CONTENT */}
+      {/* MAIN CONTENT */}
       <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "10px", maxWidth: "1100px", margin: "0 auto", paddingBottom: showFloatingButton ? "130px" : "80px" }}>
         
         {/* Header Bar */}
@@ -482,15 +496,24 @@ const CustomerView = () => {
           </div>
         </div>
 
-        {/* LIVE TABLE OCCUPIED BANNER */}
+        {/* 🚨 DELAYED SERVICE COMPLAINT BANNER */}
+        {activeUnpaidOrders.some((o) => o.status !== "Served") && (
+          <div style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74", padding: "10px 14px", borderRadius: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <AlertTriangle size={16} color="#ea580c" />
+              <span style={{ fontSize: "12px", color: "#c2410c", fontWeight: "800" }}>Waiting too long for your food?</span>
+            </div>
+            <button onClick={handleDelayComplaint} style={{ padding: "6px 12px", backgroundColor: "#ea580c", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", fontSize: "11px", cursor: "pointer" }}>
+              🚨 Alert Admin
+            </button>
+          </div>
+        )}
+
+        {/* Table Occupied Banner */}
         <div style={{
           backgroundColor: activeUnpaidOrders.length > 0 ? "#fef2f2" : "#f0fdf4",
           border: activeUnpaidOrders.length > 0 ? "1px solid #fca5a5" : "1px solid #86efac",
-          padding: "8px 12px",
-          borderRadius: "10px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center"
+          padding: "8px 12px", borderRadius: "10px", display: "flex", justifyContent: "space-between", alignItems: "center"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <span style={{ fontSize: "12px", fontWeight: "900", color: activeUnpaidOrders.length > 0 ? "#dc2626" : "#16a34a" }}>
@@ -529,7 +552,7 @@ const CustomerView = () => {
           })}
         </div>
 
-        {/* Active Round Cart */}
+        {/* Cart Bar */}
         {cart.length > 0 && (
           <div style={{ position: "sticky", bottom: "8px", backgroundColor: "#1c1917", color: "#ffffff", padding: "12px", borderRadius: "14px", zIndex: 40, boxShadow: "0 8px 25px rgba(0,0,0,0.3)" }}>
             <h4 style={{ margin: "0 0 8px 0", fontSize: "12px", fontWeight: "800" }}>🛒 Current Selection</h4>
@@ -561,34 +584,22 @@ const CustomerView = () => {
 
       </div>
 
-      {/* FLOATING BUTTON (Only visible for active ordering sessions) */}
+      {/* FLOATING BUTTON */}
       {showFloatingButton && (
         <button
           onClick={() => setShowEndMealModal(true)}
           style={{
-            position: "fixed",
-            bottom: "20px",
-            right: "20px",
-            padding: "12px 20px",
+            position: "fixed", bottom: "20px", right: "20px", padding: "12px 20px",
             backgroundColor: activeUnpaidOrders.length > 0 ? "#16a34a" : "#2563eb",
-            color: "#ffffff",
-            border: "none",
-            borderRadius: "30px",
-            fontWeight: "900",
-            fontSize: "12px",
-            boxShadow: "0 6px 20px rgba(0, 0, 0, 0.25)",
-            cursor: "pointer",
-            zIndex: 90,
-            display: "flex",
-            alignItems: "center",
-            gap: "8px"
+            color: "#ffffff", border: "none", borderRadius: "30px", fontWeight: "900", fontSize: "12px",
+            boxShadow: "0 6px 20px rgba(0, 0, 0, 0.25)", cursor: "pointer", zIndex: 90, display: "flex", alignItems: "center", gap: "8px"
           }}
         >
-          <Flag size={18} /> {activeUnpaidOrders.length > 0 ? "End Meal & Pay Bill" : "View Invoice & Receipt"}
+          <BellRing size={18} /> {activeUnpaidOrders.length > 0 ? "End Meal & Pay Bill" : "View Invoice & Receipt"}
         </button>
       )}
 
-      {/* STRICT END MEAL MODAL */}
+      {/* MODAL */}
       {showEndMealModal && (
         <EndMealModal
           tableNumber={tableNumber}

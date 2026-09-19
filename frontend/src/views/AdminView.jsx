@@ -29,23 +29,7 @@ const playKitchenChime = () => {
     gain1.connect(ctx.destination);
     osc1.start();
     osc1.stop(ctx.currentTime + 0.5);
-
-    setTimeout(() => {
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = "triangle";
-      osc2.frequency.setValueAtTime(880, ctx.currentTime);
-      osc2.frequency.exponentialRampToValueAtTime(1174.66, ctx.currentTime + 0.25);
-      gain2.gain.setValueAtTime(0.35, ctx.currentTime);
-      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start();
-      osc2.stop(ctx.currentTime + 0.6);
-    }, 150);
-  } catch (err) {
-    console.error("Audio Play Error:", err);
-  }
+  } catch (err) {}
 };
 
 const AdminView = () => {
@@ -58,11 +42,9 @@ const AdminView = () => {
   const [selectedPrintOrder, setSelectedPrintOrder] = useState(null);
   const [confirmPaymentModal, setConfirmPaymentModal] = useState(null);
   const [discountInput, setDiscountInput] = useState(0);
+  const [alertMessage, setAlertMessage] = useState(null);
 
-  // Settings State
   const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
-
-  // Kitchen States
   const [isKitchenStarted, setIsKitchenStarted] = useState(false);
   const [kitchenSubTab, setKitchenSubTab] = useState("Active");
 
@@ -75,9 +57,7 @@ const AdminView = () => {
       const res = await fetch(`${BACKEND_URL}/api/settings`);
       const data = await res.json();
       if (data.success) setSettings(data.data);
-    } catch (err) {
-      console.error("Error fetching settings:", err);
-    }
+    } catch (err) {}
   };
 
   const updateSettings = async (newSettings) => {
@@ -92,9 +72,7 @@ const AdminView = () => {
         setSettings(data.data);
         socket.emit("settings_updated");
       }
-    } catch (err) {
-      console.error("Error updating settings:", err);
-    }
+    } catch (err) {}
   };
 
   const toggleTableDisable = (tableNum) => {
@@ -132,24 +110,25 @@ const AdminView = () => {
       if (isKitchenStarted) playKitchenChime();
     };
 
+    const handleAdminAlert = (data) => {
+      setAlertMessage(data.message);
+      playKitchenChime();
+    };
+
     socket.on("order_updated", handleOrderUpdate);
     socket.on("menu_updated", fetchData);
     socket.on("settings_updated", fetchSettings);
+    socket.on("admin_alert", handleAdminAlert);
 
     return () => {
       socket.off("order_updated", handleOrderUpdate);
       socket.off("menu_updated", fetchData);
       socket.off("settings_updated", fetchSettings);
+      socket.off("admin_alert", handleAdminAlert);
     };
   }, [isKitchenStarted]);
 
   const updateOrderStatus = async (orderId, newStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => ((o._id === orderId || o.id === orderId) ? { ...o, status: newStatus } : o))
-    );
-
-    if (isKitchenStarted) playKitchenChime();
-
     try {
       let res = await fetch(`${BACKEND_URL}/api/orders/${orderId}`, {
         method: "PATCH",
@@ -168,8 +147,7 @@ const AdminView = () => {
       socket.emit("order_updated");
       fetchData();
     } catch (err) {
-      console.error("Error updating order status:", err);
-      fetchData();
+      console.error("Error updating status:", err);
     }
   };
 
@@ -184,14 +162,13 @@ const AdminView = () => {
         socket.emit("order_updated");
         fetchData();
       }
-    } catch (err) {
-      console.error("Error cancelling item:", err);
-    }
+    } catch (err) {}
   };
 
+  // 🔄 PAYMENT SETTLEMENT WITH AUTO TABLE SESSION RESET
   const executePaymentSettle = async () => {
     if (!confirmPaymentModal) return;
-    const { orderId, paymentMethod, amount } = confirmPaymentModal;
+    const { orderId, tableNumber, paymentMethod, amount } = confirmPaymentModal;
 
     const discountVal = Number(discountInput) || 0;
     const finalAmount = Math.max(0, amount - discountVal);
@@ -224,14 +201,14 @@ const AdminView = () => {
       if (res.ok) {
         setConfirmPaymentModal(null);
         setDiscountInput(0);
+
+        // ⚡ EMIT SESSION RESET TO AUTO-VACANT TABLE FOR CUSTOMERS
+        socket.emit("session_reset", { tableNumber });
         socket.emit("order_updated");
         fetchData();
-      } else {
-        alert("Payment settlement failed. Please try again.");
       }
     } catch (err) {
       console.error("Payment settlement error:", err);
-      alert("Server error during payment settlement.");
     }
   };
 
@@ -254,7 +231,6 @@ const AdminView = () => {
         setFormData((prev) => ({ ...prev, image: fileData.secure_url }));
       }
     } catch (err) {
-      console.error("Cloudinary Upload Error:", err);
     } finally {
       setUploading(false);
     }
@@ -281,9 +257,7 @@ const AdminView = () => {
         fetchData();
         socket.emit("menu_updated");
       }
-    } catch (err) {
-      console.error("Dish submit error:", err);
-    }
+    } catch (err) {}
   };
 
   const handleDeleteDish = async (id) => {
@@ -294,9 +268,7 @@ const AdminView = () => {
         fetchData();
         socket.emit("menu_updated");
       }
-    } catch (err) {
-      console.error("Delete error:", err);
-    }
+    } catch (err) {}
   };
 
   const handleEditClick = (item) => {
@@ -321,9 +293,7 @@ const AdminView = () => {
         fetchData();
         socket.emit("menu_updated");
       }
-    } catch (err) {
-      console.error("Stock toggle error:", err);
-    }
+    } catch (err) {}
   };
 
   const getOrderTotal = (o) => {
@@ -357,6 +327,16 @@ const AdminView = () => {
   return (
     <div style={{ padding: "12px", maxWidth: "1100px", margin: "0 auto", fontFamily: "sans-serif" }}>
       
+      {/* 🚨 DELAY ALERT BANNER */}
+      {alertMessage && (
+        <div style={{ backgroundColor: "#dc2626", color: "#fff", padding: "12px 16px", borderRadius: "10px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "800", boxShadow: "0 4px 12px rgba(220, 38, 38, 0.3)" }}>
+          <span>🚨 ALERT: {alertMessage}</span>
+          <button onClick={() => setAlertMessage(null)} style={{ backgroundColor: "#fff", color: "#dc2626", border: "none", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontWeight: "900" }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* ⚙️ STORE CONTROLS PANEL */}
       <div style={{ backgroundColor: "#fff", padding: "14px", borderRadius: "12px", marginBottom: "16px", border: "1px solid #e7e5e4" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
@@ -410,7 +390,7 @@ const AdminView = () => {
         </div>
       </div>
 
-      {/* Tabs Navigation */}
+      {/* Tabs */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button onClick={() => setActiveTab("billing")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "billing" ? "#dc2626" : "#e7e5e4", color: activeTab === "billing" ? "#fff" : "#44403c", fontSize: "12px" }}>
@@ -444,11 +424,15 @@ const AdminView = () => {
               const targetId = order._id || order.id;
               const total = getOrderTotal(order);
               const displayTableNo = order.tableNumber || order.table || order.tableNo || "N/A";
+              const isServed = order.status === "Served";
+
               return (
                 <div key={targetId} style={{ backgroundColor: "#fff", padding: "12px", borderRadius: "12px", border: "1px solid #f5e6d3", display: "flex", flexDirection: "column" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", backgroundColor: "#faf6f0", padding: "6px 10px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
                     <span style={{ fontSize: "16px", fontWeight: "900", color: "#dc2626" }}>TABLE #{displayTableNo}</span>
-                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#d97706", backgroundColor: "#fef3c7", padding: "2px 6px", borderRadius: "4px" }}>{order.status}</span>
+                    <span style={{ fontSize: "10px", fontWeight: "800", color: isServed ? "#15803d" : "#d97706", backgroundColor: isServed ? "#dcfce7" : "#fef3c7", padding: "2px 6px", borderRadius: "4px" }}>
+                      {order.status}
+                    </span>
                   </div>
 
                   <ul style={{ paddingLeft: "16px", fontSize: "12px", margin: "0 0 10px 0", color: "#334155", flexGrow: 1 }}>
@@ -464,12 +448,21 @@ const AdminView = () => {
                     <span>₹{total}</span>
                   </div>
 
+                  {/* 🔒 RESTRICT PAYMENT UNTIL SERVED */}
                   <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "Cash" })} style={{ flex: 1, padding: "6px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
-                      💵 Cash
+                    <button 
+                      disabled={!isServed} 
+                      onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "Cash" })} 
+                      style={{ flex: 1, padding: "8px", backgroundColor: isServed ? "#16a34a" : "#9ca3af", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: isServed ? "pointer" : "not-allowed" }}
+                    >
+                      💵 Cash {!isServed && "(Serve First)"}
                     </button>
-                    <button onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "UPI" })} style={{ flex: 1, padding: "6px", backgroundColor: "#0284c7", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: "pointer" }}>
-                      📱 UPI / QR
+                    <button 
+                      disabled={!isServed} 
+                      onClick={() => setConfirmPaymentModal({ orderId: targetId, tableNumber: displayTableNo, amount: total, paymentMethod: "UPI" })} 
+                      style={{ flex: 1, padding: "8px", backgroundColor: isServed ? "#0284c7" : "#9ca3af", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", fontSize: "11px", cursor: isServed ? "pointer" : "not-allowed" }}
+                    >
+                      📱 UPI {!isServed && "(Serve First)"}
                     </button>
                   </div>
 
@@ -538,13 +531,10 @@ const AdminView = () => {
                       padding: "14px", display: "flex", flexDirection: "column", boxShadow: "0 4px 12px rgba(0,0,0,0.05)"
                     }}
                   >
-                    {/* 🍽️ PROMINENT RED TABLE BADGE */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid #f5e6d3", paddingBottom: "8px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <span style={{ fontSize: "16px", fontWeight: "900", color: "#ffffff", backgroundColor: "#dc2626", padding: "4px 10px", borderRadius: "8px", letterSpacing: "0.5px" }}>
-                          🍽️ TABLE #{displayTableNo}
-                        </span>
-                      </div>
+                      <span style={{ fontSize: "16px", fontWeight: "900", color: "#ffffff", backgroundColor: "#dc2626", padding: "4px 10px", borderRadius: "8px", letterSpacing: "0.5px" }}>
+                        🍽️ TABLE #{displayTableNo}
+                      </span>
                       <span style={{ fontSize: "11px", fontWeight: "800", padding: "4px 8px", borderRadius: "6px", backgroundColor: isCancelled ? "#fee2e2" : isReady ? "#e0f2fe" : isPreparing ? "#fef3c7" : "#dcfce7", color: isCancelled ? "#dc2626" : isReady ? "#0369a1" : isPreparing ? "#d97706" : "#15803d" }}>
                         {order.status}
                       </span>
@@ -598,7 +588,7 @@ const AdminView = () => {
         </div>
       )}
 
-      {/* TAB 3: Audit Ledger Reports */}
+      {/* TAB 3: Accounting Ledger */}
       {activeTab === "accounting" && (
         <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "12px", border: "1px solid #e7e5e4", overflowX: "auto" }}>
           <h4 style={{ margin: "0 0 14px 0", fontSize: "14px", fontWeight: "800", color: "#1c1917" }}>
@@ -819,7 +809,7 @@ const AdminView = () => {
         </div>
       )}
 
-      {/* Thermal Bill Modal */}
+      {/* Receipt Modal */}
       {selectedPrintOrder && (
         <PrintReceipt order={selectedPrintOrder} onClose={() => setSelectedPrintOrder(null)} />
       )}

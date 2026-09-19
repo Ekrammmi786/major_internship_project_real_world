@@ -4,22 +4,22 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import dns from "dns";
 
 import orderRoutes from "./routes/order.Routes.js";
 import menuRoutes from "./routes/menu.Routes.js";
 import settingRoutes from "./routes/settings.routes.js";
-import dns from "dns";
-
-dotenv.config();
 
 dns.setServers([
   "1.1.1.1",
   "8.8.8.8"
-])
+]);
+
+dotenv.config();
+
 const app = express();
 const server = http.createServer(app);
 
-// 🌐 Dynamic CORS Origin Fix
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -33,7 +33,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// 🔌 Socket.io Setup
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
@@ -67,12 +66,21 @@ io.on("connection", (socket) => {
     io.emit("settings_updated");
   });
 
+  // 🚨 Delay Complaint Socket Event
+  socket.on("customer_complaint", (data) => {
+    io.emit("admin_alert", data);
+  });
+
+  // 🔄 Automatic Session Reset Socket Event
+  socket.on("session_reset", (data) => {
+    io.emit("session_reset", data);
+  });
+
   socket.on("disconnect", () => {
     console.log("❌ Client Disconnected:", socket.id);
   });
 });
 
-// 📍 Routes Setup
 app.use("/api/orders", orderRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/settings", settingRoutes);
@@ -81,7 +89,6 @@ app.get("/", (req, res) => {
   res.send("The Rice Bowl POS Backend API is live...");
 });
 
-// 🚀 Start Server
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/ricebowl";
 

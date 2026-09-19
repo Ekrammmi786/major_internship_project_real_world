@@ -94,7 +94,7 @@ const KitchenView = () => {
                 color: activeTab === tab ? "#ffffff" : "#94a3b8"
               }}
             >
-              {tab} Queue
+              {tab} Queue ({orders.filter(o => tab === "Active" ? ["Pending", "Preparing", "Ready"].includes(o.status) : o.status === tab).length})
             </button>
           ))}
         </div>
@@ -114,6 +114,7 @@ const KitchenView = () => {
             const isPending = order.status === "Pending";
             const isPreparing = order.status === "Preparing";
             const isReady = order.status === "Ready";
+            const isCancelled = order.status === "Cancelled";
 
             return (
               <div
@@ -125,12 +126,12 @@ const KitchenView = () => {
                   boxShadow: "0 8px 20px rgba(0,0,0,0.4)",
                   display: "flex",
                   flexDirection: "column",
-                  border: isPreparing ? "3px solid #f59e0b" : isReady ? "3px solid #0284c7" : "1px solid #e2e8f0"
+                  border: isCancelled ? "3px solid #ef4444" : isPreparing ? "3px solid #f59e0b" : isReady ? "3px solid #0284c7" : "1px solid #e2e8f0"
                 }}
               >
                 {/* 🔴 HIGH CONTRAST TABLE HEADER */}
                 <div style={{
-                  backgroundColor: "#dc2626",
+                  backgroundColor: isCancelled ? "#991b1b" : "#dc2626",
                   padding: "10px 14px",
                   display: "flex",
                   justifyContent: "space-between",
@@ -146,7 +147,7 @@ const KitchenView = () => {
                     padding: "4px 8px",
                     borderRadius: "6px",
                     backgroundColor: "#ffffff",
-                    color: isPreparing ? "#d97706" : isReady ? "#0284c7" : "#dc2626"
+                    color: isCancelled ? "#dc2626" : isPreparing ? "#d97706" : isReady ? "#0284c7" : "#dc2626"
                   }}>
                     {order.status}
                   </span>
@@ -154,50 +155,71 @@ const KitchenView = () => {
 
                 {/* Items List */}
                 <div style={{ padding: "14px", flexGrow: 1, color: "#0f172a" }}>
-                  <ul style={{ paddingLeft: "18px", margin: 0, fontSize: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {order.items?.map((item, idx) => (
-                      <li key={idx} style={{ textDecoration: item.status === "Cancelled" ? "line-through" : "none", color: item.status === "Cancelled" ? "#94a3b8" : "#0f172a" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ fontWeight: "700" }}>{item.name}</span>
-                          <span style={{ fontWeight: "900", color: "#dc2626" }}>×{item.quantity}</span>
-                        </div>
-                      </li>
-                    ))}
+                  <ul style={{ paddingLeft: "0px", listStyle: "none", margin: 0, fontSize: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {order.items?.map((item, idx) => {
+                      const isItemCancelled = item.status === "Cancelled" || isCancelled;
+                      return (
+                        <li 
+                          key={idx} 
+                          style={{ 
+                            padding: "6px 8px",
+                            borderRadius: "6px",
+                            backgroundColor: isItemCancelled ? "#fef2f2" : "#f8fafc",
+                            border: isItemCancelled ? "1px dashed #fca5a5" : "1px solid #f1f5f9",
+                            textDecoration: isItemCancelled ? "line-through" : "none", 
+                            color: isItemCancelled ? "#dc2626" : "#0f172a",
+                            opacity: isItemCancelled ? 0.75 : 1 
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontWeight: isItemCancelled ? "600" : "700" }}>
+                              {item.name} {isItemCancelled && <strong style={{ fontSize: "10px", color: "#dc2626", marginLeft: "4px" }}>[CANCELLED]</strong>}
+                            </span>
+                            <span style={{ fontWeight: "900", color: isItemCancelled ? "#dc2626" : "#0284c7" }}>
+                              ×{item.quantity}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
 
                 {/* Action Controls */}
-                <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
-                  {isPending && (
-                    <button
-                      onClick={() => updateOrderStatus(targetId, "Preparing")}
-                      style={{ width: "100%", padding: "10px", backgroundColor: "#0284c7", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
-                    >
-                      👨‍🍳 Start Cooking
-                    </button>
-                  )}
+                {!isCancelled && (
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                    {isPending && (
+                      <button
+                        onClick={() => updateOrderStatus(targetId, "Preparing")}
+                        style={{ width: "100%", padding: "10px", backgroundColor: "#0284c7", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
+                      >
+                        👨‍🍳 Start Cooking
+                      </button>
+                    )}
 
-                  {isPreparing && (
-                    <button
-                      onClick={() => updateOrderStatus(targetId, "Ready")}
-                      style={{ width: "100%", padding: "10px", backgroundColor: "#f59e0b", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
-                    >
-                      🔔 Ready to Serve
-                    </button>
-                  )}
+                    {isPreparing && (
+                      <button
+                        onClick={() => updateOrderStatus(targetId, "Ready")}
+                        style={{ width: "100%", padding: "10px", backgroundColor: "#f59e0b", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
+                      >
+                        🔔 Ready to Serve
+                      </button>
+                    )}
 
-                  {isReady && (
-                    <button
-                      onClick={() => updateOrderStatus(targetId, "Served")}
-                      style={{ width: "100%", padding: "10px", backgroundColor: "#16a34a", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
-                    >
-                      ✅ Mark as Served
-                    </button>
-                  )}
-                </div>
+                    {isReady && (
+                      <button
+                        onClick={() => updateOrderStatus(targetId, "Served")}
+                        style={{ width: "100%", padding: "10px", backgroundColor: "#16a34a", color: "#ffffff", border: "none", borderRadius: "8px", fontWeight: "900", fontSize: "13px", cursor: "pointer" }}
+                      >
+                        ✅ Mark as Served
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
-          })}
+          })
+        )}
       </div>
     </div>
   );
