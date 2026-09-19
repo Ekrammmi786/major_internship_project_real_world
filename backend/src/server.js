@@ -5,7 +5,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import dns from "dns";
-
 import orderRoutes from "./routes/order.Routes.js";
 import menuRoutes from "./routes/menu.Routes.js";
 import settingRoutes from "./routes/settings.routes.js";
@@ -14,7 +13,6 @@ dns.setServers([
   "1.1.1.1",
   "8.8.8.8"
 ]);
-
 dotenv.config();
 
 const app = express();
@@ -71,7 +69,7 @@ io.on("connection", (socket) => {
     io.emit("admin_alert", data);
   });
 
-  // 🔄 Automatic Session Reset Socket Event
+  // 🔄 Session Reset Broadcast Event
   socket.on("session_reset", (data) => {
     io.emit("session_reset", data);
   });

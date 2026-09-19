@@ -245,15 +245,25 @@ const CustomerView = () => {
     }
   };
 
+  // 🔒 STRICT TABLE ORDER FETCHING & FAIL-SAFE AUTO-CLEAR
   const fetchTableOrders = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/orders`);
       const data = await res.json();
       const allOrders = data.success && Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [];
-      const filtered = allOrders.filter(
-        (o) => String(o.tableNumber) === String(tableNumber) && o.status !== "Cancelled"
+      
+      const activeUnpaidOrders = allOrders.filter(
+        (o) => String(o.tableNumber) === String(tableNumber) && 
+               ["Pending", "Preparing", "Ready", "Served"].includes(o.status)
       );
-      setTableOrders(filtered);
+
+      setTableOrders(activeUnpaidOrders);
+
+      // FAIL-SAFE: Agar table par koi Unpaid order active nahi hai, local session purge kar do
+      if (activeUnpaidOrders.length === 0) {
+        sessionStorage.removeItem(`session_orders_${tableNumber}`);
+        setSessionOrderIds([]);
+      }
     } catch (err) {
       console.error("Error fetching table orders:", err);
     }
@@ -264,7 +274,7 @@ const CustomerView = () => {
     fetchMenu();
     fetchTableOrders();
 
-    // 🔄 AUTOMATIC SESSION RESET LISTENER (Admin Settle Payment)
+    // ⚡ AUTOMATIC SESSION RESET LISTENER
     const handleSessionReset = (data) => {
       if (String(data.tableNumber) === String(tableNumber)) {
         sessionStorage.removeItem(`session_orders_${tableNumber}`);
@@ -410,7 +420,7 @@ const CustomerView = () => {
     <div style={{ position: "relative", minHeight: "100vh" }}>
       <Background3D />
 
-      {/* SPLASH SCREEN */}
+      {/* SPLASH SCREEN OVERLAY */}
       <AnimatePresence>
         {!hasSwipedUp && (
           <motion.div

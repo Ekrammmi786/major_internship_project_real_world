@@ -202,7 +202,7 @@ const AdminView = () => {
         setConfirmPaymentModal(null);
         setDiscountInput(0);
 
-        // ⚡ EMIT SESSION RESET TO AUTO-VACANT TABLE FOR CUSTOMERS
+        // ⚡ BROADCAST TABLE CLEAR SIGNAL TO ALL CUSTOMER PHONES
         socket.emit("session_reset", { tableNumber });
         socket.emit("order_updated");
         fetchData();
