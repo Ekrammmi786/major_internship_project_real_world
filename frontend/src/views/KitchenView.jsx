@@ -1,17 +1,37 @@
 import React, { useState, useEffect } from "react";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 const socket = io(BACKEND_URL, {
   transports: ["websocket", "polling"],
   withCredentials: true
 });
 
+const playChimeSound = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(659.25, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (err) {}
+};
+
 const KitchenView = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Active");
+  const [serviceAlerts, setServiceAlerts] = useState([]);
 
   const fetchOrders = async () => {
     try {
@@ -29,9 +49,30 @@ const KitchenView = () => {
   useEffect(() => {
     fetchOrders();
 
+    const handleServiceAlert = (data) => {
+      if (data && data.message) {
+        setServiceAlerts((prev) => [
+          { id: Date.now() + Math.random(), ...data },
+          ...prev
+        ]);
+        playChimeSound();
+      }
+    };
+
     socket.on("order_updated", fetchOrders);
-    return () => socket.off("order_updated", fetchOrders);
+    socket.on("kitchen_alert", handleServiceAlert);
+    socket.on("service_alert", handleServiceAlert);
+
+    return () => {
+      socket.off("order_updated", fetchOrders);
+      socket.off("kitchen_alert", handleServiceAlert);
+      socket.off("service_alert", handleServiceAlert);
+    };
   }, []);
+
+  const dismissAlert = (alertId) => {
+    setServiceAlerts((prev) => prev.filter((a) => a.id !== alertId));
+  };
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
@@ -75,7 +116,7 @@ const KitchenView = () => {
     <div style={{ backgroundColor: "#090a0f", minHeight: "100vh", padding: "20px", fontFamily: "sans-serif", color: "#ffffff" }}>
       
       {/* Top Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#ef4444", display: "flex", alignItems: "center", gap: "8px" }}>
             👨‍🍳 Kitchen Display System ({orders.filter(o => ["Pending", "Preparing", "Ready"].includes(o.status)).length} Active)
@@ -99,6 +140,48 @@ const KitchenView = () => {
           ))}
         </div>
       </div>
+
+      {/* 🔔 LIVE TABLE SERVICE ALERTS (WATER, CLEAN TABLE, CALL WAITER) */}
+      {serviceAlerts.length > 0 && (
+        <div style={{ marginBottom: "20px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          {serviceAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              style={{
+                backgroundColor: "#7c2d12",
+                border: "2px solid #f97316",
+                color: "#ffedd5",
+                padding: "12px 16px",
+                borderRadius: "10px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                boxShadow: "0 4px 15px rgba(249, 115, 22, 0.3)"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: "800", fontSize: "14px" }}>
+                <span style={{ fontSize: "20px" }}>🚨</span>
+                <span>{alert.message || `Table #${alert.tableNumber} Service Alert`}</span>
+              </div>
+              <button
+                onClick={() => dismissAlert(alert.id)}
+                style={{
+                  backgroundColor: "#f97316",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "6px 14px",
+                  borderRadius: "6px",
+                  fontWeight: "900",
+                  fontSize: "12px",
+                  cursor: "pointer"
+                }}
+              >
+                ✅ Done / Clear
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Orders Grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: "16px" }}>
@@ -129,7 +212,7 @@ const KitchenView = () => {
                   border: isCancelled ? "3px solid #ef4444" : isPreparing ? "3px solid #f59e0b" : isReady ? "3px solid #0284c7" : "1px solid #e2e8f0"
                 }}
               >
-                {/* 🔴 HIGH CONTRAST TABLE HEADER */}
+                {/* 🔴 TABLE HEADER */}
                 <div style={{
                   backgroundColor: isCancelled ? "#991b1b" : "#dc2626",
                   padding: "10px 14px",
@@ -153,7 +236,7 @@ const KitchenView = () => {
                   </span>
                 </div>
 
-                {/* Items List */}
+                {/* Items List with Custom Notes */}
                 <div style={{ padding: "14px", flexGrow: 1, color: "#0f172a" }}>
                   <ul style={{ paddingLeft: "0px", listStyle: "none", margin: 0, fontSize: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
                     {order.items?.map((item, idx) => {
@@ -162,27 +245,38 @@ const KitchenView = () => {
                         <li 
                           key={idx} 
                           style={{ 
-                            padding: "6px 8px",
+                            padding: "8px",
                             borderRadius: "6px",
                             backgroundColor: isItemCancelled ? "#fef2f2" : "#f8fafc",
-                            border: isItemCancelled ? "1px dashed #fca5a5" : "1px solid #f1f5f9",
+                            border: isItemCancelled ? "1px dashed #fca5a5" : "1px solid #e2e8f0",
                             textDecoration: isItemCancelled ? "line-through" : "none", 
-                            color: isItemCancelled ? "#dc2626" : "#0f172a",
-                            opacity: isItemCancelled ? 0.75 : 1 
+                            color: isItemCancelled ? "#dc2626" : "#0f172a"
                           }}
                         >
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontWeight: isItemCancelled ? "600" : "700" }}>
+                            <span style={{ fontWeight: isItemCancelled ? "600" : "800" }}>
                               {item.name} {isItemCancelled && <strong style={{ fontSize: "10px", color: "#dc2626", marginLeft: "4px" }}>[CANCELLED]</strong>}
                             </span>
-                            <span style={{ fontWeight: "900", color: isItemCancelled ? "#dc2626" : "#0284c7" }}>
+                            <span style={{ fontWeight: "900", color: isItemCancelled ? "#dc2626" : "#0284c7", fontSize: "15px" }}>
                               ×{item.quantity}
                             </span>
                           </div>
+
+                          {item.instructions && !isItemCancelled && (
+                            <div style={{ fontSize: "11px", color: "#d97706", backgroundColor: "#fef3c7", padding: "3px 6px", borderRadius: "4px", marginTop: "4px", fontWeight: "800", border: "1px dashed #f59e0b" }}>
+                              ✍️ Note: {item.instructions}
+                            </div>
+                          )}
                         </li>
                       );
                     })}
                   </ul>
+
+                  {order.orderNote && !isCancelled && (
+                    <div style={{ marginTop: "10px", padding: "8px", backgroundColor: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "6px", fontSize: "12px", color: "#1e40af", fontWeight: "800" }}>
+                      📝 Table Note: {order.orderNote}
+                    </div>
+                  )}
                 </div>
 
                 {/* Action Controls */}

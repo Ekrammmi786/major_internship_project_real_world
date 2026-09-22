@@ -6,7 +6,7 @@ import { exportOrdersToCSV } from "../utils/exportToExcel";
 const CLOUD_NAME = "mno0e0mz"; 
 const UPLOAD_PRESET = "order_app";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://rice-bowl-ordering-app.onrender.com";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 const socket = io(BACKEND_URL, {
   transports: ["websocket", "polling"],
@@ -42,7 +42,7 @@ const AdminView = () => {
   const [selectedPrintOrder, setSelectedPrintOrder] = useState(null);
   const [confirmPaymentModal, setConfirmPaymentModal] = useState(null);
   const [discountInput, setDiscountInput] = useState(0);
-  const [alertMessage, setAlertMessage] = useState(null);
+  const [adminAlerts, setAdminAlerts] = useState([]);
 
   const [settings, setSettings] = useState({ isRestaurantOpen: true, disabledTables: [] });
   const [isKitchenStarted, setIsKitchenStarted] = useState(false);
@@ -111,22 +111,33 @@ const AdminView = () => {
     };
 
     const handleAdminAlert = (data) => {
-      setAlertMessage(data.message);
-      playKitchenChime();
+      if (data && data.message) {
+        setAdminAlerts((prev) => [
+          { id: Date.now() + Math.random(), ...data },
+          ...prev
+        ]);
+        playKitchenChime();
+      }
     };
 
     socket.on("order_updated", handleOrderUpdate);
     socket.on("menu_updated", fetchData);
     socket.on("settings_updated", fetchSettings);
     socket.on("admin_alert", handleAdminAlert);
+    socket.on("service_alert", handleAdminAlert);
 
     return () => {
       socket.off("order_updated", handleOrderUpdate);
       socket.off("menu_updated", fetchData);
       socket.off("settings_updated", fetchSettings);
       socket.off("admin_alert", handleAdminAlert);
+      socket.off("service_alert", handleAdminAlert);
     };
   }, [isKitchenStarted]);
+
+  const dismissAdminAlert = (alertId) => {
+    setAdminAlerts((prev) => prev.filter((a) => a.id !== alertId));
+  };
 
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
@@ -165,15 +176,11 @@ const AdminView = () => {
     } catch (err) {}
   };
 
-  // 🔄 PAYMENT SETTLEMENT WITH AUTO TABLE SESSION RESET
   const executePaymentSettle = async () => {
     if (!confirmPaymentModal) return;
     const { orderId, tableNumber, paymentMethod, amount } = confirmPaymentModal;
 
     const discountVal = Number(discountInput) || 0;
-    const finalAmount = Math.max(0, amount - discountVal);
-    const cashAmount = paymentMethod === "Cash" ? finalAmount : 0;
-    const upiAmount = paymentMethod === "UPI" ? finalAmount : 0;
 
     try {
       let res = await fetch(`${BACKEND_URL}/api/orders/${orderId}/pay`, {
@@ -181,28 +188,14 @@ const AdminView = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           paymentMethod,
-          cashAmount,
-          upiAmount,
           discountAmount: discountVal
         })
       });
-
-      if (!res.ok) {
-        res = await fetch(`${BACKEND_URL}/api/orders/${orderId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            status: "Paid",
-            paymentMethod
-          })
-        });
-      }
 
       if (res.ok) {
         setConfirmPaymentModal(null);
         setDiscountInput(0);
 
-        // ⚡ BROADCAST TABLE CLEAR SIGNAL TO ALL CUSTOMER PHONES
         socket.emit("session_reset", { tableNumber });
         socket.emit("order_updated");
         fetchData();
@@ -327,13 +320,38 @@ const AdminView = () => {
   return (
     <div style={{ padding: "12px", maxWidth: "1100px", margin: "0 auto", fontFamily: "sans-serif" }}>
       
-      {/* 🚨 DELAY ALERT BANNER */}
-      {alertMessage && (
-        <div style={{ backgroundColor: "#dc2626", color: "#fff", padding: "12px 16px", borderRadius: "10px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "800", boxShadow: "0 4px 12px rgba(220, 38, 38, 0.3)" }}>
-          <span>🚨 ALERT: {alertMessage}</span>
-          <button onClick={() => setAlertMessage(null)} style={{ backgroundColor: "#fff", color: "#dc2626", border: "none", padding: "4px 12px", borderRadius: "6px", cursor: "pointer", fontWeight: "900" }}>
-            Dismiss
-          </button>
+      {/* 🚨 LIVE SERVICE & WAITER CALL ALERTS BANNER QUEUE */}
+      {adminAlerts.length > 0 && (
+        <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          {adminAlerts.map((alert) => (
+            <div 
+              key={alert.id}
+              style={{ 
+                backgroundColor: "#dc2626", 
+                color: "#ffffff", 
+                padding: "12px 16px", 
+                borderRadius: "10px", 
+                display: "flex", 
+                justifyContent: "space-between", 
+                alignItems: "center", 
+                fontWeight: "900", 
+                fontSize: "13px",
+                boxShadow: "0 6px 20px rgba(220, 38, 38, 0.35)",
+                border: "2px solid #fca5a5"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "20px" }}>🔔</span>
+                <span>{alert.message || `Table #${alert.tableNumber} Service Request`}</span>
+              </div>
+              <button 
+                onClick={() => dismissAdminAlert(alert.id)} 
+                style={{ backgroundColor: "#ffffff", color: "#dc2626", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontWeight: "900", fontSize: "11px" }}
+              >
+                Clear Alert
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -390,7 +408,7 @@ const AdminView = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Navigation Tabs */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button onClick={() => setActiveTab("billing")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "billing" ? "#dc2626" : "#e7e5e4", color: activeTab === "billing" ? "#fff" : "#44403c", fontSize: "12px" }}>
@@ -403,7 +421,7 @@ const AdminView = () => {
             📑 Ledger Reports ({paidOrders.length})
           </button>
           <button onClick={() => setActiveTab("menu")} style={{ padding: "8px 14px", borderRadius: "8px", border: "none", fontWeight: "700", cursor: "pointer", backgroundColor: activeTab === "menu" ? "#dc2626" : "#e7e5e4", color: activeTab === "menu" ? "#fff" : "#44403c", fontSize: "12px" }}>
-            📜 Menu & Dish Management ({menuItems.length})
+            📜 Menu Management ({menuItems.length})
           </button>
         </div>
 
@@ -439,16 +457,22 @@ const AdminView = () => {
                     {order.items?.map((item, idx) => (
                       <li key={idx} style={{ textDecoration: item.status === "Cancelled" ? "line-through" : "none" }}>
                         <strong>{item.name}</strong> × {item.quantity} (₹{item.price * item.quantity})
+                        {item.instructions && <span style={{ color: "#d97706", display: "block", fontSize: "10px" }}>✍️ {item.instructions}</span>}
                       </li>
                     ))}
                   </ul>
+
+                  {order.orderNote && (
+                    <div style={{ fontSize: "11px", color: "#1e40af", backgroundColor: "#eff6ff", padding: "4px 8px", borderRadius: "4px", marginBottom: "8px" }}>
+                      📝 Note: {order.orderNote}
+                    </div>
+                  )}
 
                   <div style={{ fontSize: "15px", fontWeight: "800", color: "#dc2626", marginBottom: "10px", borderTop: "1px dashed #e7e5e4", paddingTop: "6px", display: "flex", justifyContent: "space-between" }}>
                     <span>Total Bill:</span>
                     <span>₹{total}</span>
                   </div>
 
-                  {/* 🔒 RESTRICT PAYMENT UNTIL SERVED */}
                   <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
                     <button 
                       disabled={!isServed} 
@@ -481,8 +505,8 @@ const AdminView = () => {
         <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "12px", border: "1px solid #e7e5e4" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", backgroundColor: "#faf6f0", padding: "10px 14px", borderRadius: "8px", border: "1px solid #f5e6d3" }}>
             <div>
-              <strong style={{ fontSize: "13px", color: "#1c1917", display: "block" }}>Kitchen Order Notification Sound</strong>
-              <span style={{ fontSize: "11px", color: "#78716c" }}>Status: {isKitchenStarted ? "🔔 Sound Active & Alerting" : "🔇 Muted"}</span>
+              <strong style={{ fontSize: "13px", color: "#1c1917", display: "block" }}>Kitchen Notification Sound</strong>
+              <span style={{ fontSize: "11px", color: "#78716c" }}>Status: {isKitchenStarted ? "🔔 Sound Active" : "🔇 Muted"}</span>
             </div>
             <button
               onClick={() => { setIsKitchenStarted(true); playKitchenChime(); }}
@@ -518,9 +542,7 @@ const AdminView = () => {
                 const isPending = order.status === "Pending";
                 const isPreparing = order.status === "Preparing";
                 const isReady = order.status === "Ready";
-                const isServed = order.status === "Served";
                 const isCancelled = order.status === "Cancelled";
-
                 const displayTableNo = order.tableNumber || order.table || order.tableNo || "N/A";
 
                 return (
@@ -532,7 +554,7 @@ const AdminView = () => {
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid #f5e6d3", paddingBottom: "8px" }}>
-                      <span style={{ fontSize: "16px", fontWeight: "900", color: "#ffffff", backgroundColor: "#dc2626", padding: "4px 10px", borderRadius: "8px", letterSpacing: "0.5px" }}>
+                      <span style={{ fontSize: "16px", fontWeight: "900", color: "#ffffff", backgroundColor: "#dc2626", padding: "4px 10px", borderRadius: "8px" }}>
                         🍽️ TABLE #{displayTableNo}
                       </span>
                       <span style={{ fontSize: "11px", fontWeight: "800", padding: "4px 8px", borderRadius: "6px", backgroundColor: isCancelled ? "#fee2e2" : isReady ? "#e0f2fe" : isPreparing ? "#fef3c7" : "#dcfce7", color: isCancelled ? "#dc2626" : isReady ? "#0369a1" : isPreparing ? "#d97706" : "#15803d" }}>
@@ -547,7 +569,7 @@ const AdminView = () => {
                           <li key={idx} style={{ textDecoration: isItemCancelled ? "line-through" : "none", color: isItemCancelled ? "#94a3b8" : "#334155", marginBottom: "6px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <span><strong>{item.name}</strong> × {item.quantity}</span>
-                              {!isItemCancelled && !isServed && !isCancelled && (
+                              {!isItemCancelled && order.status !== "Served" && !isCancelled && (
                                 <button
                                   onClick={() => handleCancelItem(targetId, idx)}
                                   style={{ backgroundColor: "transparent", color: "#ef4444", border: "1px solid #fee2e2", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", cursor: "pointer" }}
@@ -556,6 +578,11 @@ const AdminView = () => {
                                 </button>
                               )}
                             </div>
+                            {item.instructions && !isItemCancelled && (
+                              <div style={{ fontSize: "11px", color: "#d97706", backgroundColor: "#fef3c7", padding: "2px 6px", borderRadius: "4px", marginTop: "2px" }}>
+                                ✍️ Note: {item.instructions}
+                              </div>
+                            )}
                           </li>
                         );
                       })}
@@ -798,10 +825,10 @@ const AdminView = () => {
             </div>
 
             <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={executePaymentSettle} style={{ flex: 1, padding: "10px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "800", cursor: "pointer" }}>
+              <button onClick={executePaymentSettle} style={{ flex: 1, padding: "10px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "800", cursor: "pointer" }}>
                 Confirm & Pay
               </button>
-              <button onClick={() => { setConfirmPaymentModal(null); setDiscountInput(0); }} style={{ flex: 1, padding: "10px", backgroundColor: "#78716c", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "700", cursor: "pointer" }}>
+              <button onClick={() => { setConfirmPaymentModal(null); setDiscountInput(0); }} style={{ flex: 1, padding: "10px", backgroundColor: "#78716c", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "700", cursor: "pointer" }}>
                 Cancel
               </button>
             </div>
